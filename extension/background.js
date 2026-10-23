@@ -87,6 +87,7 @@ async function progressSummary() {
     candidates.push({
       created: job.created,
       status: job.status,
+      finished: job.finished || 0,
       done: job.counts.complete,
       failed: job.counts.error,
       total: job.total,
@@ -130,6 +131,7 @@ async function progressSummary() {
     candidates.push({
       created: job.created,
       status: job.status,
+      finished: job.finished || 0,
       done: job.counts.complete,
       failed: job.counts.interrupted + job.counts.error,
       total: job.entries.length,
@@ -138,13 +140,16 @@ async function progressSummary() {
     });
   }
 
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => {
-    const aRun = a.status === "running" ? 1 : 0;
-    const bRun = b.status === "running" ? 1 : 0;
-    return bRun - aRun || (b.created || 0) - (a.created || 0);
-  });
-  const best = candidates[0];
+  const running = candidates.filter((c) => c.status === "running");
+  // a stalled/cancelled/old job must NOT keep showing stale counts forever;
+  // when nothing runs, only a just-finished job lingers briefly as confirmation
+  const RECENT = 60000;
+  const pool = running.length
+    ? running
+    : candidates.filter((c) => c.status === "done" && Date.now() - (c.finished || 0) < RECENT);
+  if (!pool.length) return null;
+  pool.sort((a, b) => (b.created || 0) - (a.created || 0));
+  const best = pool[0];
   best.percent = best.total ? Math.round((100 * best.done) / best.total) : 0;
   return best;
 }
