@@ -6,6 +6,7 @@
 // and everything stateful lives here.
 
 import { nativeMove } from "./native.js";
+import { getSettings, setCourseRoot } from "./common.js";
 import { registerDownloadName } from "./name-guard.js";
 
 const HD_KEY = "hdJobs";
@@ -313,6 +314,40 @@ export async function runHdJob(jobId) {
   );
 }
 
+/**
+ * Relocate + register a finished HD course. Called from the worker-awaited
+ * completion path so it runs with nothing open -- not dependent on a UI poll.
+ */
+export async function finishHdJob(jobId) {
+  const job = (await readJobs()).find((j) => j.id === jobId);
+  if (!job || job.status !== "done" || job.relocated || !job.counts && !job.entries) return;
+  const complete = job.entries.filter((e) => e.state === "complete");
+  if (!complete.length) return;
+  const { nativeTarget } = await getSettings();
+  if (nativeTarget) {
+    try {
+      const res = await relocateFinishedHdJob(jobId, nativeTarget);
+      if (res) {
+        await setCourseRoot(job.courseTitle, res.to);
+        notify("Course moved", `${res.moved} file(s) -> ${res.to}`);
+      }
+    } catch (err) {
+      console.warn("hd finalize relocate failed:", err.message);
+    }
+  } else {
+    // no helper: record the download-folder location for the player
+    const done = complete.find((e) => e.abs);
+    if (done) {
+      const rel = done.path.replace(/\//g, "\\");
+      if (done.abs.toLowerCase().endsWith(rel.toLowerCase())) {
+        const root = done.abs.slice(0, done.abs.length - rel.length);
+        const parts = done.path.split("/");
+        await setCourseRoot(job.courseTitle, root + parts[0] + "\\" + parts[1]);
+      }
+    }
+  }
+}
+
 export async function startHdJob(plan, opts = {}) {
   const entries = hdCandidates(plan, opts);
   if (!entries.length) throw new Error("No HLS-capable lectures found for HD mode.");
@@ -338,9 +373,11 @@ export async function startHdJob(plan, opts = {}) {
     await patchJob(job.id, { status: "error", error: worker.reason });
     throw new Error(worker.reason);
   }
-  runHdJob(job.id).catch(async (err) => {
-    await patchJob(job.id, { status: "error", error: err.message, current: null });
-  });
+  runHdJob(job.id)
+    .then(() => finishHdJob(job.id))
+    .catch(async (err) => {
+      await patchJob(job.id, { status: "error", error: err.message, current: null });
+    });
   return job;
 }
 
@@ -355,7 +392,7 @@ export async function resumeHdJobs() {
   await writeJobs(jobs);
   const worker = await ensureOffscreen();
   if (!worker.ok) return null;
-  runHdJob(running.id).catch(() => {});
+  runHdJob(running.id).then(() => finishHdJob(running.id)).catch(() => {});
   return running.id;
 }
 

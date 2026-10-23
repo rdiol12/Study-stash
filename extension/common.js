@@ -126,6 +126,17 @@ export async function exportCookiesTxt() {
 export const PREFS_KEY = "formPrefs";
 export const DEST_KEY = "destPath";
 
+/** Record a course's absolute folder so the offline player can build file://
+ *  URLs. Shared by the background worker and the download runners. */
+export async function setCourseRoot(courseTitle, root) {
+  if (!courseTitle || !root) return;
+  const stored = await chrome.storage.local.get("courses");
+  const courses = stored.courses || {};
+  if (!courses[courseTitle] || courses[courseTitle].root === root) return;
+  courses[courseTitle].root = root;
+  await chrome.storage.local.set({ courses });
+}
+
 export async function getPrefs() {
   const stored = await chrome.storage.local.get([PREFS_KEY, DEST_KEY]);
   return { prefs: stored[PREFS_KEY] || {}, dest: stored[DEST_KEY] || "" };

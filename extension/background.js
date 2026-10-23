@@ -1,25 +1,38 @@
-import { api, getSettings, queueAuto } from "./common.js";
+import { api, getSettings, queueAuto, setCourseRoot } from "./common.js";
 import { installNameGuard } from "./name-guard.js";
 
 // exactly one listener is allowed across ALL extension contexts, and download
 // drivers now run only here -- so the guard lives only here
 installNameGuard();
 import {
-  applyProgress, hdJobStatus, listHdJobs, relocateFinishedHdJob, resumeHdJobs,
-  watchdogHdJobs,
+  applyProgress, hdJobStatus, listHdJobs, resumeHdJobs, watchdogHdJobs,
 } from "./hd-runner.js";
 import {
   listLocalJobs, localJobStatus, pumpLocalJob, relocateFinishedJob,
 } from "./local-runner.js";
 
-/** The player needs an absolute folder to build file:// URLs from. */
-async function setCourseRoot(courseTitle, root) {
-  if (!courseTitle || !root) return;
-  const stored = await chrome.storage.local.get("courses");
-  const courses = stored.courses || {};
-  if (!courses[courseTitle] || courses[courseTitle].root === root) return;
-  courses[courseTitle].root = root;
-  await chrome.storage.local.set({ courses });
+/** Relocate + register a finished LOCAL job. Idempotent via job.relocated. */
+async function finalizeLocalJob(job) {
+  if (!job || job.status !== "done" || job.relocated || !job.counts.complete) return;
+  const { nativeTarget } = await getSettings();
+  if (nativeTarget) {
+    try {
+      const res = await relocateFinishedJob(job.id, nativeTarget);
+      if (res) {
+        await setCourseRoot(job.courseTitle, res.to);
+        chrome.notifications.create({
+          type: "basic",
+          iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+          title: "Course moved",
+          message: `${res.moved} file(s) -> ${res.to}`,
+        });
+      }
+    } catch (err) {
+      console.warn("relocate failed:", err.message);
+    }
+  } else {
+    await deriveCourseRoot(job).catch(() => {});
+  }
 }
 
 /** Derive the course folder from any completed entry's absolute filename by
@@ -52,36 +65,6 @@ async function progressSummary() {
   for (const stub of await listHdJobs()) {
     const job = await hdJobStatus(stub.id);
     if (!job) continue;
-    // finished HD course: hand it to the helper, same as plain jobs
-    if (job.status === "done" && !job.relocated && job.counts.complete) {
-      const { nativeTarget } = await getSettings();
-      if (nativeTarget) {
-        relocateFinishedHdJob(job.id, nativeTarget)
-          .then((res) => {
-            if (res) {
-              setCourseRoot(job.courseTitle, res.to);
-              chrome.notifications.create({
-                type: "basic",
-                iconUrl: chrome.runtime.getURL("icons/icon128.png"),
-                title: "Course moved",
-                message: `${res.moved} file(s) -> ${res.to}`,
-              });
-            }
-          })
-          .catch((err) => console.warn("hd relocate failed:", err.message));
-      } else {
-        // course stays under the download folder; record it for the player
-        const done = job.entries.find((e) => e.state === "complete" && e.abs);
-        if (done) {
-          const rel = done.path.replace(/\//g, "\\");
-          if (done.abs && done.abs.toLowerCase().endsWith(rel.toLowerCase())) {
-            const root = done.abs.slice(0, done.abs.length - rel.length);
-            const parts = done.path.split("/");
-            setCourseRoot(job.courseTitle, root + parts[0] + "\\" + parts[1]);
-          }
-        }
-      }
-    }
 
     const cur = job.current;
     candidates.push({
@@ -105,29 +88,7 @@ async function progressSummary() {
     if (!job) continue;
     // feed the next queued files into the freed download slots
     if (job.status === "running") await pumpLocalJob(job.id).catch(() => {});
-    // finished and not yet moved? hand it to the helper
-    if (job.status === "done" && !job.relocated && job.counts.complete) {
-      const { nativeTarget } = await getSettings();
-      if (nativeTarget) {
-        relocateFinishedJob(job.id, nativeTarget)
-          .then((res) => {
-            if (res) {
-              setCourseRoot(job.courseTitle, res.to);
-              chrome.notifications.create({
-                type: "basic",
-                iconUrl: chrome.runtime.getURL("icons/icon128.png"),
-                title: "Course moved",
-                message: `${res.moved} file(s) -> ${res.to}`,
-              });
-            }
-          })
-          .catch((err) => console.warn("relocate failed:", err.message));
-      } else {
-        // no helper: the course stays under the download folder, and only a
-        // real DownloadItem knows that folder's absolute path
-        deriveCourseRoot(job).catch(() => {});
-      }
-    }
+    await finalizeLocalJob(job);
     candidates.push({
       created: job.created,
       status: job.status,
@@ -168,6 +129,26 @@ function wake() {
 
 chrome.runtime.onInstalled.addListener(wake);
 chrome.runtime.onStartup.addListener(wake);
+
+// A download finishing is the reliable completion signal for plain jobs: pump
+// the next queued file, and finalize (move + register) when the job is done --
+// independent of whether any popup or tab is polling.
+chrome.downloads.onChanged.addListener(async (delta) => {
+  const term = delta.state && (delta.state.current === "complete" || delta.state.current === "interrupted");
+  if (!term) return;
+  try {
+    for (const stub of await listLocalJobs()) {
+      const raw = (await listLocalJobs()).find((j) => j.id === stub.id);
+      if (!raw || !raw.entries.some((e) => e.downloadId === delta.id)) continue;
+      await pumpLocalJob(stub.id).catch(() => {});
+      const job = await localJobStatus(stub.id);
+      if (job) await finalizeLocalJob(job);
+      break;
+    }
+  } catch (err) {
+    console.warn("onChanged finalize failed:", err.message);
+  }
+});
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM) refreshBadge();
