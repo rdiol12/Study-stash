@@ -402,6 +402,17 @@ function play(rel, { resume = false } = {}) {
   renderSections();
 }
 
+/** <track> accepts only WebVTT; container-mode captions are .srt. The whole
+ *  conversion is a header plus decimal commas becoming dots in timestamps. */
+function srtToVtt(srt) {
+  const body = String(srt)
+    .replace(//g, "")
+    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  return "WEBVTT
+
+" + body;
+}
+
 // blob URLs of the current lecture's subtitle tracks, revoked on switch
 let trackUrls = [];
 
@@ -422,9 +433,17 @@ async function loadSubtitles(course, item) {
 
   for (const lang of langs) {
     try {
-      const res = await fetch(fileUrl(course.root, `${base}.${lang}.vtt`));
-      if (!res.ok) continue;
-      const blobUrl = URL.createObjectURL(await res.blob());
+      // browser mode saves .vtt; container mode converts to .srt -- probe both
+      let text = null;
+      let res = await fetch(fileUrl(course.root, `${base}.${lang}.vtt`)).catch(() => null);
+      if (res && res.ok) {
+        text = await res.text();
+      } else {
+        res = await fetch(fileUrl(course.root, `${base}.${lang}.srt`)).catch(() => null);
+        if (res && res.ok) text = srtToVtt(await res.text());
+      }
+      if (!text) continue;
+      const blobUrl = URL.createObjectURL(new Blob([text], { type: "text/vtt" }));
       trackUrls.push(blobUrl);
 
       const track = document.createElement("track");

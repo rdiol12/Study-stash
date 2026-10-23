@@ -389,29 +389,3 @@ export function buildPlan(items, courseTitle) {
   };
 }
 
-/** WebVTT to SRT. Small enough to ship as a data: URL from the worker. */
-export function vttToSrt(vtt) {
-  const lines = String(vtt).replace(/\r/g, "").split("\n");
-  const cues = [];
-  let cue = null;
-
-  for (const line of lines) {
-    const m = line.match(
-      /(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})/
-    );
-    if (m) {
-      if (cue) cues.push(cue);
-      cue = { start: m[1].replace(".", ","), end: m[2].replace(".", ","), text: [] };
-    } else if (cue && line.trim() === "") {
-      cues.push(cue);
-      cue = null;
-    } else if (cue) {
-      cue.text.push(line);
-    }
-  }
-  if (cue) cues.push(cue);
-
-  return cues
-    .map((c, i) => `${i + 1}\n${c.start} --> ${c.end}\n${c.text.join("\n").trim()}\n`)
-    .join("\n");
-}
