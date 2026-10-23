@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Udemy Downloader Bridge — transmux worker</title>
+  </head>
+  <body>
+    <!-- mux.js sets a global; loading it as a classic script first lets the
+         module below read window.muxjs without bundling. -->
+    <script src="vendor/mux.min.js"></script>
+    <script type="module" src="offscreen.js"></script>
+  </body>
+</html>

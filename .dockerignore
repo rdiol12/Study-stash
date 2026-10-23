@@ -1,0 +1,26 @@
+# Secrets: compose reads .env from the host project dir, so there is no reason
+# to bake the API token into an image layer.
+.env
+keyfile.json
+
+# Host virtualenv: wrong platform, and ~200 MB of pointless build context
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Large or host-specific data that the container gets as volumes instead
+output/
+out_dir/
+saved/
+logs/
+temp/
+working_dir/
+*.mp4
+*.aria2
+cookies.txt
+
+.git/
+.github/
+extension/
+*.crx

@@ -1,0 +1,115 @@
+# syntax=docker/dockerfile:1
+# Long-running API variant of the upstream Dockerfile, for the browser extension.
+# Kept separate so `git pull` never conflicts with upstream's Dockerfile.
+#
+# This network has a transparent HTTP proxy that mangles bodies: apt over
+# plain http returns packages with the right filesize but a wrong SHA256
+# ("Hash Sum mismatch"), and sometimes stale 404s. Hence two defences:
+#   1. everything over https, so a middlebox cannot rewrite content
+#   2. exactly one apt package (aria2); python is already here, so curl/jq/
+#      xz-utils are unnecessary and every one of them was a failure candidate
+FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
+      /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+    printf '%s\n' \
+      'Acquire::Retries "8";' \
+      'Acquire::http::No-Cache "true";' \
+      'Acquire::https::No-Cache "true";' \
+      'Acquire::BrokenProxy "true";' \
+      > /etc/apt/apt.conf.d/99hardened \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends aria2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && aria2c --version | head -1
+
+# Python deps before the binaries: pip is the expensive layer on a slow link,
+# and this ordering means swapping a binary source doesn't invalidate it.
+COPY requirements.txt /app/requirements.txt
+COPY server/requirements.txt /app/server/requirements.txt
+RUN pip install --no-cache-dir --retries 10 --timeout 120 -r /app/requirements.txt \
+    && pip install --no-cache-dir --retries 10 --timeout 120 -r /app/server/requirements.txt
+
+# ffmpeg: BtbN GPL build, measured to contain nvenc (mwader/static-ffmpeg has
+# none, and johnvansickle's was never verified). nvenc dlopen's libnvidia-encode
+# at runtime, so a static binary is fine -- the driver comes from the toolkit.
+# Downloaded with python rather than curl, and extracted with tarfile rather
+# than xz-utils, to keep the apt surface at one package.
+#
+# Pinned to the n8.1 release branch, NOT master/n9.0. Measured on this host:
+# master and n9.0 are built against nvenc SDK 13.1, which demands driver
+# >= 610.00; driver 591.97 provides API 13.0, so hevc_nvenc refuses to open
+# ("Driver does not support the required nvenc API version"). n8.1 encodes
+# fine. Revisit only after an NVIDIA driver update.
+RUN <<'PY' python
+import os, shutil, sys, tarfile, time, urllib.request
+URL = ("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
+       "ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz")
+dst = "/tmp/ffmpeg.tar.xz"
+for attempt in range(1, 16):
+    try:
+        with urllib.request.urlopen(URL, timeout=180) as r, open(dst, "wb") as f:
+            shutil.copyfileobj(r, f, 1 << 18)
+        break
+    except Exception as exc:
+        print(f"ffmpeg attempt {attempt} failed: {exc}", flush=True)
+        time.sleep(5)
+else:
+    sys.exit("ffmpeg download failed after 15 attempts")
+with tarfile.open(dst) as tar:
+    for member in tar.getmembers():
+        if member.name.endswith(("/bin/ffmpeg", "/bin/ffprobe")):
+            member.name = os.path.basename(member.name)
+            tar.extract(member, "/usr/local/bin")
+for name in ("ffmpeg", "ffprobe"):
+    os.chmod(f"/usr/local/bin/{name}", 0o755)
+os.remove(dst)
+PY
+
+# Build-time assertion: fail loudly here rather than ship an image whose GPU
+# encode can never work.
+RUN ffmpeg -hide_banner -encoders | grep -q hevc_nvenc \
+    && echo "ffmpeg has hevc_nvenc"
+
+# Shaka Packager, installed under the name main.py shells out to. Version
+# pinned (verified to exist) so no jq/GitHub-API round trip is needed.
+ARG SHAKA_VERSION=v3.9.3
+RUN <<'PY' python
+import os, shutil, sys, time, urllib.request
+ver = os.environ.get("SHAKA_VERSION") or "v3.9.3"
+URL = (f"https://github.com/shaka-project/shaka-packager/releases/download/"
+       f"{ver}/packager-linux-x64")
+dst = "/usr/local/bin/shaka-packager"
+for attempt in range(1, 16):
+    try:
+        with urllib.request.urlopen(URL, timeout=180) as r, open(dst, "wb") as f:
+            shutil.copyfileobj(r, f, 1 << 18)
+        break
+    except Exception as exc:
+        print(f"shaka attempt {attempt} failed: {exc}", flush=True)
+        time.sleep(5)
+else:
+    sys.exit("shaka-packager download failed after 15 attempts")
+os.chmod(dst, 0o755)
+PY
+RUN shaka-packager --version || true
+
+COPY . /app
+
+ENV PYTHONUNBUFFERED=1 \
+    UD_APP_DIR=/app \
+    UD_OUT_DIR=/app/out_dir \
+    UD_LIBRARY=/library \
+    UD_PORT=8787
+
+RUN mkdir -p /app/out_dir /app/saved /app/logs /library
+
+EXPOSE 8787
+
+# python, not curl: see the apt note at the top
+HEALTHCHECK --interval=30s --timeout=6s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request as u, sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8787/api/health', timeout=4).status == 200 else 1)"
+
+CMD ["python", "server/app.py"]

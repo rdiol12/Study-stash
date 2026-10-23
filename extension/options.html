@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>Udemy Downloader Bridge — Settings</title>
+    <style>
+      body { width: 480px; }
+    </style>
+  </head>
+  <body>
+    <header><h1>Bridge settings</h1><span id="health" class="pill pill-wait">checking…</span></header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <section>
+      <label for="apiBase">API base URL</label>
+      <input id="apiBase" type="url" placeholder="http://127.0.0.1:8787" />
+      <p class="hint">Where the udemy-downloader container listens. Change this only if you edited the port in docker-compose.server.yml.</p>
+    </section>
+
+    <section>
+      <label for="apiToken">API token</label>
+      <input id="apiToken" type="password" placeholder="value of UD_API_TOKEN from .env" />
+      <p class="hint">Must match <code>UD_API_TOKEN</code> in the repo's <code>.env</code>. Without it the API rejects every request.</p>
+    </section>
+
+    <div class="actions">
+      <button id="btnTest" class="secondary">Test connection</button>
+      <button id="btnSave" class="primary">Save</button>
+    </div>
+
+    <section>
+      <label>Local helper (browser mode)</label>
+      <p class="hint">
+        Moves finished courses out of the browser download folder to anywhere on
+        disk, so no tab needs to stay open. Register it once with
+        <code>native\install.ps1</code>, then restart Brave.
+      </p>
+      <div class="dest-row">
+        <span id="helperState" class="dest-path">not checked</span>
+        <button id="btnHelper" class="small">Test helper</button>
+      </div>
+    </section>
+
+    <section>
+      <p class="hint">
+        Downloaded courses land in the repo's <code>output/</code> folder on the host.
+        Decryption keys for DRM lectures go in <code>keyfile.json</code>; this extension
+        neither reads nor obtains them.
+      </p>
+    </section>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

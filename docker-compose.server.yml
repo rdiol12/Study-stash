@@ -1,0 +1,44 @@
+services:
+  udemy-downloader-api:
+    container_name: udemy-downloader-api
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    restart: unless-stopped
+    # localhost only: this service holds your Udemy bearer token
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      UD_API_TOKEN: ${UD_API_TOKEN:?set UD_API_TOKEN in .env}
+      UD_MAX_JOBS: ${UD_MAX_JOBS:-1}
+      UD_OUT_DIR: /app/out_dir
+      UD_LIBRARY: /library
+      # "video" is the capability that exposes libnvidia-encode (NVENC).
+      # compute/utility alone give you CUDA but no encoder.
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+    # NVENC passthrough. If the host has no NVIDIA runtime this makes `up` fail;
+    # start with `-f docker-compose.server.yml -f docker-compose.nogpu.yml` then.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              # Must be [gpu] only. Adding "video" (which is what you need on
+              # native Linux to get libnvidia-encode) fails the capability
+              # match on Docker Desktop/WSL2 and the toolkit then silently
+              # injects nothing -- /dev/dxg appears but nvidia-smi does not.
+              # On WSL2 the whole driver surface comes via /usr/lib/wsl/lib.
+              capabilities: [gpu]
+    volumes:
+      # Destination library. Each host drive is mounted as a subfolder of
+      # /library so the picker shows them like drive letters; mounting a single
+      # drive at /library itself meant there was nothing to click into.
+      # Add more lines here (then `docker compose up -d`) for other drives.
+      - ${UD_LIBRARY_A:-./output}:/library/A:rw
+      - ${UD_LIBRARY_C:-./output}:/library/C:rw
+      - ./output:/app/out_dir:rw
+      - ./saved:/app/saved:rw
+      - ./logs:/app/logs:rw
+      - ./keyfile.json:/app/keyfile.json:ro
