@@ -15,10 +15,12 @@ export const DEFAULTS = {
   // absolute path the native helper moves finished courses to; "" = leave them
   // in the browser download folder
   nativeTarget: "",
+  // how many files download at once in browser mode (plain + extras jobs)
+  parallel: 3,
 };
 
 export async function getSettings() {
-  const stored = await chrome.storage.local.get(["apiBase", "apiToken", "useContainer", "nativeTarget"]);
+  const stored = await chrome.storage.local.get(["apiBase", "apiToken", "useContainer", "nativeTarget", "parallel"]);
   return { ...DEFAULTS, ...stored };
 }
 

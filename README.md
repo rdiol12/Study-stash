@@ -1,8 +1,10 @@
 <p align="center"><a href="https://www.buymeacoffee.com/rdiol12" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="60" width="217"></a></p>
 
+<p align="center"><em>If my work helped you, a coffee keeps the next project coming.</em></p>
+
 <div align="center">
 
-# 🎓 Udemy Downloader Bridge
+# Udemy Downloader Bridge
 
 **Download your Udemy courses. Watch them offline. Keep your progress.**
 
@@ -40,7 +42,7 @@ Docker engine when you want the heavy artillery.
 ```text
 1. Clone this repo
 2. brave://extensions → Developer mode → Load unpacked → select extension/
-3. Open a Udemy course you're enrolled in → click ⤓ Download course
+3. Open a Udemy course you're enrolled in → click the "Download course" button
 4. Popup → My courses → press play 
 ```
 
@@ -53,7 +55,7 @@ the full Docker setup.
 |  | Extension only | + Docker |
 |---|---|---|
 | Install | none | Docker Desktop |
-| 1080p | ✅ in-browser transmux | ✅ native ffmpeg (faster) |
+| 1080p | in-browser transmux | native ffmpeg (faster) |
 | DRM lectures | skipped | skipped |
 | Resume interrupted course | re-downloads | skips existing files |
 

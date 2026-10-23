@@ -9,7 +9,7 @@ import {
   watchdogHdJobs,
 } from "./hd-runner.js";
 import {
-  listLocalJobs, localJobStatus, relocateFinishedJob,
+  listLocalJobs, localJobStatus, pumpLocalJob, relocateFinishedJob,
 } from "./local-runner.js";
 
 /** The player needs an absolute folder to build file:// URLs from. */
@@ -102,6 +102,8 @@ async function progressSummary() {
   for (const stub of await listLocalJobs()) {
     const job = await localJobStatus(stub.id);
     if (!job) continue;
+    // feed the next queued files into the freed download slots
+    if (job.status === "running") await pumpLocalJob(job.id).catch(() => {});
     // finished and not yet moved? hand it to the helper
     if (job.status === "done" && !job.relocated && job.counts.complete) {
       const { nativeTarget } = await getSettings();

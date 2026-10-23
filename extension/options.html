@@ -25,6 +25,13 @@
       <p class="hint">Must match <code>UD_API_TOKEN</code> in the repo's <code>.env</code>. Without it the API rejects every request.</p>
     </section>
 
+    <section>
+      <label for="parallel">Parallel downloads</label>
+      <input id="parallel" type="number" min="1" max="8" value="3" />
+      <p class="hint">How many files download at once in browser mode. 1080p lectures
+      have their own control in the popup's Advanced section.</p>
+    </section>
+
     <div class="actions">
       <button id="btnTest" class="secondary">Test connection</button>
       <button id="btnSave" class="primary">Save</button>

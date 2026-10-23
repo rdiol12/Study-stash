@@ -56,14 +56,16 @@ async function testHelper() {
 }
 
 (async function init() {
-  const { apiBase, apiToken } = await getSettings();
+  const { apiBase, apiToken, parallel } = await getSettings();
   $("apiBase").value = apiBase;
   $("apiToken").value = apiToken;
+  $("parallel").value = parallel;
 
   $("btnSave").addEventListener("click", async () => {
     await setSettings({
       apiBase: $("apiBase").value.trim() || "http://127.0.0.1:8787",
       apiToken: $("apiToken").value.trim(),
+      parallel: Math.max(1, Math.min(8, Number($("parallel").value) || 3)),
     });
     setBanner("Saved.", "info");
     await test();
