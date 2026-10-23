@@ -1,0 +1,9 @@
+# Escape hatch: layer this over docker-compose.server.yml to drop the GPU
+# reservation when no NVIDIA runtime is available.
+#   docker compose -f docker-compose.server.yml -f docker-compose.nogpu.yml up -d
+services:
+  udemy-downloader-api:
+    deploy:
+      resources:
+        reservations:
+          devices: []

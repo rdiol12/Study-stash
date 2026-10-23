@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Udemy Downloader Bridge",
+  "version": "1.0.0",
+  "description": "Queue the Udemy course in the current tab to a local udemy-downloader container.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "cookies",
+    "storage",
+    "tabs",
+    "alarms",
+    "downloads",
+    "offscreen",
+    "notifications",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "*://*.udemy.com/*",
+    "*://*.udemycdn.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "file:///*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.udemy.com/course/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Udemy Downloader Bridge",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "options_page": "options.html"
+}
