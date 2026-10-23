@@ -15,7 +15,7 @@ Docker engine when you want the heavy artillery.
 [![Docker optional](https://img.shields.io/badge/Docker-optional-2496ED?logo=docker&logoColor=white)](MANUAL.md#mode-2--extension--docker-the-full-engine)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
 
-[**Setup Manual**](MANUAL.md) · [**Quick Start**](#quick-start) · [**Support ☕**](#support-this-project)
+[**Setup Manual**](MANUAL.md) · [**Quick Start**](#quick-start)
 
 </div>
 
@@ -76,12 +76,6 @@ the next feature:
 <a href="https://www.buymeacoffee.com/rdiol12" target="_blank"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee" height="32"></a>
 
 …and a ⭐ on the repo is always free.
-
-## Disclaimer
-
-Downloading courses violates Udemy's Terms of Service — use at your own risk,
-only for content **you are enrolled in**. This build contains **no DRM
-circumvention code**: protected lectures are detected and skipped.
 
 ## License
 
