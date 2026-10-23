@@ -405,12 +405,13 @@ function play(rel, { resume = false } = {}) {
 /** <track> accepts only WebVTT; container-mode captions are .srt. The whole
  *  conversion is a header plus decimal commas becoming dots in timestamps. */
 function srtToVtt(srt) {
-  const body = String(srt)
-    .replace(//g, "")
-    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
-  return "WEBVTT
-
-" + body;
+  // No literal backslashes near this regex: two generations of patch
+  // tooling corrupted them. Char codes are immune.
+  const CR = String.fromCharCode(13);
+  const d = String.fromCharCode(92) + 'd';  // regex token for a digit
+  const stamp = new RegExp('(' + d + '{2}:' + d + '{2}:' + d + '{2}),(' + d + '{3})', 'g');
+  const body = String(srt).split(CR).join('').replace(stamp, '$1.$2');
+  return 'WEBVTT' + String.fromCharCode(10, 10) + body;
 }
 
 // blob URLs of the current lecture's subtitle tracks, revoked on switch
