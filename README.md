@@ -29,7 +29,7 @@ Docker engine when you want the heavy artillery.
 |---|---|
 | **One-click download** | Grab any course you're enrolled in, right from the course page |
 | **Real quality** | 720p direct, or **1080p** transmuxed in-browser — never re-encoded |
-| **Offline player** | Course library with video thumbnails, sections, ✓ per lecture |
+| **Offline player** | Course library with video thumbnails, sections, per-lecture watched ticks |
 | **Picks up where you stopped** | Resume positions per video, autoplay next, playback speed |
 | **Scrub previews** | Hover the seek bar, see the frame — YouTube style |
 | **Subtitles** | Downloaded captions appear in the player's CC menu |
