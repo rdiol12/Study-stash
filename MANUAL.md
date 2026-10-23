@@ -6,8 +6,11 @@ scrub previews, subtitles, interactive quizzes), and optionally pairs with a
 Docker service for faster native-ffmpeg 1080p and bulk downloads.
 
 Built on top of [Puyodead1/udemy-downloader](https://github.com/Puyodead1/udemy-downloader)
-(MIT). Upstream files are untouched except one two-line ffmpeg-flag fix, so
-`git pull` from upstream stays clean.
+(MIT). This fork diverges from upstream: all DRM/decryption code was removed
+(`mp4parse.py`, `utils.py`, the Widevine protobuf files and the keyfile, plus
+about 200 lines of `main.py`, which now skips DRM-protected lectures). Pulling
+from upstream will conflict in `main.py`, `constants.py` and `requirements.txt`
+and needs a manual merge that keeps the DRM code out.
 
 > Downloading courses is against Udemy's Terms of Service. Use at your own
 > risk, for content you are enrolled in. Nothing here obtains, derives or

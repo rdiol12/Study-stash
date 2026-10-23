@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Udemy Downloader Bridge",
   "version": "1.0.0",
-  "description": "Queue the Udemy course in the current tab to a local udemy-downloader container.",
+  "description": "Download Udemy courses you are enrolled in and watch them offline, in the browser or via an optional local downloader service.",
   "minimum_chrome_version": "116",
   "permissions": [
     "cookies",
