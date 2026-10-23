@@ -32,6 +32,8 @@ CHAPTER_RE = re.compile(r"^[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*$")
 ORIGIN_RE = re.compile(r"^(chrome-extension://[a-z]{32}|moz-extension://[0-9a-f-]+)$")
 PROGRESS_RE = re.compile(r"Processing lecture (\d+) of (\d+)")
 TOTAL_RE = re.compile(r"Lecture\(s\) \((\d+)\)")
+# main.py's process_lecture warning for a protected lecture
+DRM_SKIP_MARK = "is DRM-protected"
 PERCENT_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)%")
 
 H265_PRESETS = {
@@ -192,6 +194,7 @@ class Job:
         self.lecture = None
         self.total_lectures = None
         self.percent = None
+        self.drm_skipped = 0
         self.proc = None
         self.cancelled = False
         self._lines = deque(maxlen=LOG_CAP)
@@ -221,6 +224,8 @@ class Job:
         m = TOTAL_RE.search(line)
         if m:
             self.total_lectures = int(m.group(1))
+        if DRM_SKIP_MARK in line:
+            self.drm_skipped += 1
 
     def lines_since(self, cursor):
         with self._lock:
@@ -352,6 +357,7 @@ class Job:
             "lecture": self.lecture,
             "total_lectures": self.total_lectures,
             "percent": self.percent,
+            "drm_skipped": self.drm_skipped,
             "argv": self.argv,
         }
 

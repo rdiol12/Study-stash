@@ -365,6 +365,7 @@ export function buildPlan(items, courseTitle) {
     chapter.lectures.push({
       name,
       kind: "video",
+      lectureId: item.id,
       drm: !streams,
       url: best ? best.url : null,
       height: best ? best.height : null,

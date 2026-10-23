@@ -339,7 +339,17 @@ function renderSections() {
       label.textContent = item.name;
       const sub = document.createElement("div");
       sub.className = "sub";
-      if (item.drm) sub.textContent = "DRM — not downloaded";
+      if (item.drm) {
+        sub.textContent = "Protected, watch on Udemy";
+        if (item.watchUrl) {
+          const link = document.createElement("a");
+          link.href = item.watchUrl;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = "Open";
+          sub.append(" · ", link);
+        }
+      }
       else if (item.kind === "quiz") sub.textContent = "Quiz";
       else if (ip.done) sub.textContent = fmt(ip.d) || "watched";
       else if (ip.t > 1) sub.textContent = `resume at ${fmt(ip.t)}${ip.d ? " / " + fmt(ip.d) : ""}`;

@@ -102,7 +102,19 @@ than a feature.
 ### DRM
 
 Not supported: this build contains no decryption code. DRM-protected lectures
-are detected and skipped in both modes.
+are detected and skipped in every mode, and never written as empty or broken
+files.
+
+A lecture counts as protected when Udemy serves it without plain `stream_urls`.
+Where skipped lectures show up:
+
+- **Popup, browser modes:** each one is listed as "DRM, watch on Udemy", and the
+  job line counts them separately from other skips (HLS-only, quizzes).
+- **Popup, Docker mode:** the job line shows "N DRM-protected skipped"; the log
+  names each lecture.
+- **Course player:** the lecture stays in the sidebar, greyed out, marked
+  "Protected, watch on Udemy" with a link to it on Udemy. It does not count
+  toward course progress.
 
 ---
 

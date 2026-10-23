@@ -1421,11 +1421,12 @@ def process_lecture(lecture, lecture_path, chapter_dir):
 
     if is_encrypted:
         # DRM support removed from this build: protected lectures are skipped
-        logger.info(
+        # server/app.py counts this exact phrase; keep it in sync
+        logger.warning(
             f"      > Lecture '{lecture_title}' is DRM-protected — skipping (no DRM support in this build)"
         )
     else:
-        sources = lecture.get("sources")
+        sources = lecture.get("sources") or []
         sources = sorted(sources, key=lambda x: int(x.get("height")), reverse=True)
         if sources:
             if not os.path.isfile(lecture_path):
@@ -1517,7 +1518,7 @@ def process_lecture(lecture, lecture_path, chapter_dir):
                     f"      > Lecture '{lecture_title}' is already downloaded, skipping..."
                 )
         else:
-            logger.error("      > Missing sources for lecture", lecture)
+            logger.error("      > Missing sources for lecture '%s'", lecture_title)
 
 
 def process_quiz(udemy: Udemy, lecture, chapter_dir):

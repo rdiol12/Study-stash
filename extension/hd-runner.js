@@ -129,7 +129,8 @@ function parseChapterFilter(raw) {
   return want.size ? want : null;
 }
 
-/** Videos that can take the HLS path: unencrypted and with a master playlist. */
+/** Videos that can take the HLS path: unencrypted and with a master playlist.
+ *  DRM lectures are listed as skipped so the job shows what was left out. */
 export function hdCandidates(plan, opts = {}) {
   const wantChapters = parseChapterFilter(opts.chapter);
   const out = [];
@@ -138,9 +139,15 @@ export function hdCandidates(plan, opts = {}) {
   plan.chapters.forEach((chapter, idx) => {
     if (wantChapters && !wantChapters.has(idx + 1)) return;
     for (const lecture of chapter.lectures) {
-      if (lecture.kind !== "video" || lecture.drm || !lecture.hlsUrl) continue;
+      if (lecture.kind !== "video") continue;
+      const path = `${root}/${chapter.title}/${lecture.name}.mp4`;
+      if (lecture.drm) {
+        out.push({ path, state: "skipped", reason: "drm" });
+        continue;
+      }
+      if (!lecture.hlsUrl) continue;
       out.push({
-        path: `${root}/${chapter.title}/${lecture.name}.mp4`,
+        path,
         masterUrl: lecture.hlsUrl,
         maxHeight: opts.maxHeight || 1080,
         state: "pending",
@@ -350,7 +357,13 @@ export async function finishHdJob(jobId) {
 
 export async function startHdJob(plan, opts = {}) {
   const entries = hdCandidates(plan, opts);
-  if (!entries.length) throw new Error("No HLS-capable lectures found for HD mode.");
+  if (!entries.some((e) => e.state === "pending")) {
+    throw new Error(
+      entries.length
+        ? "Every video in this selection is DRM-protected; nothing can be downloaded."
+        : "No HLS-capable lectures found for HD mode."
+    );
+  }
 
   const job = {
     id: `hd-${Date.now().toString(36)}`,
@@ -451,7 +464,7 @@ export async function hdJobStatus(jobId) {
   const job = (await readJobs()).find((j) => j.id === jobId);
   if (!job) return null;
 
-  const counts = { complete: 0, error: 0, pending: 0, cancelled: 0, active: 0 };
+  const counts = { complete: 0, error: 0, pending: 0, cancelled: 0, active: 0, skipped: 0 };
   let bytes = 0;
   for (const entry of job.entries) {
     if (entry.state === "complete") {
@@ -459,6 +472,7 @@ export async function hdJobStatus(jobId) {
       bytes += entry.bytes || 0;
     } else if (entry.state === "error") counts.error += 1;
     else if (entry.state === "cancelled") counts.cancelled += 1;
+    else if (entry.state === "skipped") counts.skipped += 1;
     else if (entry.state === "active") {
       counts.active = (counts.active || 0) + 1;
       bytes += entry.liveBytes || 0;
@@ -466,13 +480,14 @@ export async function hdJobStatus(jobId) {
   }
 
   // segments are the only measurable unit: a TS stream has no Content-Length
+  const total = job.entries.length - counts.skipped;
   let etaSeconds = null;
   if (job.status === "running" && job.startedAt && job.segDoneTotal > 0) {
     const elapsed = (Date.now() - job.startedAt) / 1000;
     const rate = job.segDoneTotal / elapsed;
     const perLecture = job.segPerLecture || 0;
     if (rate > 0 && perLecture > 0) {
-      const estTotal = perLecture * job.entries.length;
+      const estTotal = perLecture * total;
       etaSeconds = Math.round(Math.max(0, estTotal - job.segDoneTotal) / rate);
     }
   }
@@ -482,7 +497,7 @@ export async function hdJobStatus(jobId) {
       ? Math.round((Date.now() - job.current.updatedAt) / 1000)
       : null;
 
-  return { ...job, counts, bytes, total: job.entries.length, etaSeconds, stalledFor };
+  return { ...job, counts, bytes, total, etaSeconds, stalledFor };
 }
 
 export async function cancelHdJob(jobId) {

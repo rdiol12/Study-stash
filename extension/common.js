@@ -258,6 +258,10 @@ async function saveCourseManifest(plan, opts) {
         kind: l.kind,
         rel: `${ch.title}/${l.name}${l.kind === "quiz" ? ".html" : ".mp4"}`,
         drm: !!l.drm,
+        // protected lectures stay on Udemy; the player links straight to them
+        watchUrl: l.drm && opts.courseUrl && l.lectureId
+          ? `${opts.courseUrl}lecture/${l.lectureId}`
+          : null,
         // caption languages available on Udemy; the player probes which of
         // these were actually downloaded
         captions: (l.captions || []).map((c) => c.lang),
@@ -321,6 +325,7 @@ async function queueLocal({ courseUrl, infoOnly }) {
     skipLectures: !!prefs.skip_lectures,
     chapter: prefs.chapter,
     lang: prefs.lang,
+    courseUrl: parsed.normalized,
   };
 
   if (opts.quizzes) await prepareQuizzes(plan, parsed.portal);

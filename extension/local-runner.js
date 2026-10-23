@@ -183,7 +183,7 @@ export async function localJobStatus(jobId) {
   const job = jobs.find((j) => j.id === jobId) || jobs[0];
   if (!job) return null;
 
-  const counts = { complete: 0, running: 0, interrupted: 0, skipped: 0, error: 0, queued: 0 };
+  const counts = { complete: 0, running: 0, interrupted: 0, skipped: 0, drm: 0, error: 0, queued: 0 };
   let bytes = 0;
   let total = 0;
   const files = [];
@@ -196,6 +196,7 @@ export async function localJobStatus(jobId) {
     }
     if (entry.state === "skipped") {
       counts.skipped += 1;
+      if (entry.reason === "drm") counts.drm += 1;
       files.push({ path: entry.path, state: "skipped", reason: entry.reason });
       continue;
     }

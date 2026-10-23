@@ -162,7 +162,7 @@ function renderFiles(files, ctx = {}) {
     let pct = 0;
     if (file.state === "skipped") {
       meta.textContent =
-        file.reason === "drm" ? "DRM" : file.reason === "hls-only" ? "HLS only" : file.reason || "skipped";
+        file.reason === "drm" ? "DRM, watch on Udemy" : file.reason === "hls-only" ? "HLS only" : file.reason || "skipped";
     } else if (file.state === "error") {
       meta.textContent = "failed";
     } else if (file.segTotal) {
@@ -457,7 +457,7 @@ async function refreshEngine() {
     state.engine = "container";
     $("engineState").textContent = "connected";
     $("engineState").className = "pill pill-ok";
-    $("engineHint").textContent = "1080p, DRM with your own keys, and GPU encoding.";
+    $("engineHint").textContent = "1080p and GPU encoding. DRM lectures skipped.";
   } else {
     state.engine = "local";
     $("engineState").textContent = "not reachable";
@@ -747,6 +747,7 @@ async function refreshDetail() {
         : "";
     $("jobStatus").textContent =
       `${live.status} · ${c.complete}/${live.total} done, ${c.error} failed` +
+      (c.skipped ? `, ${c.skipped} DRM-protected skipped` : "") +
       (live.bytes ? ` · ${mb(live.bytes)}` : "") +
       (cur && cur.segTotal
         ? ` · ${cur.height || "?"}p segment ${cur.segDone}/${cur.segTotal}`
@@ -786,7 +787,9 @@ async function refreshDetail() {
     const mb = (n) => `${(n / 1048576).toFixed(0)} MB`;
     $("jobStatus").textContent =
       `${live.status} · ${c.complete} done, ${c.running} running, ` +
-      `${c.interrupted} failed, ${c.skipped} DRM-skipped` +
+      `${c.interrupted} failed` +
+      (c.drm ? `, ${c.drm} DRM-protected skipped` : "") +
+      (c.skipped - (c.drm || 0) ? `, ${c.skipped - (c.drm || 0)} other skipped` : "") +
       (live.bytes ? ` · ${mb(live.bytes)}` : "");
     $("btnCancel").hidden = c.running === 0;
     renderFiles(live.files || [], { jobId, mode: "local" });
@@ -812,6 +815,7 @@ async function refreshDetail() {
   const bits = [job.status];
   if (job.lecture && job.total_lectures) bits.push(`lecture ${job.lecture}/${job.total_lectures}`);
   if (job.current) bits.push(job.current.slice(0, 60));
+  if (job.drm_skipped) bits.push(`${job.drm_skipped} DRM-protected skipped`);
   if (job.error) bits.push(job.error);
   $("jobStatus").textContent = bits.join(" · ");
   $("btnCancel").hidden = !(job.status === "running" || job.status === "queued");
