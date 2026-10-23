@@ -7,6 +7,8 @@
 // "Allow access to file URLs" toggle on brave://extensions — checked at
 // runtime with a real fetch, not assumed.
 
+import { srtToVtt } from "./captions.js";
+
 const COURSES_KEY = "courses";
 const PROGRESS_KEY = "playerProgress";
 const DONE_AT = 0.95; // Udemy ticks a lecture near the end, not only at 100%
@@ -400,18 +402,6 @@ function play(rel, { resume = false } = {}) {
 
   saveProgress();
   renderSections();
-}
-
-/** <track> accepts only WebVTT; container-mode captions are .srt. The whole
- *  conversion is a header plus decimal commas becoming dots in timestamps. */
-function srtToVtt(srt) {
-  // No literal backslashes near this regex: two generations of patch
-  // tooling corrupted them. Char codes are immune.
-  const CR = String.fromCharCode(13);
-  const d = String.fromCharCode(92) + 'd';  // regex token for a digit
-  const stamp = new RegExp('(' + d + '{2}:' + d + '{2}:' + d + '{2}),(' + d + '{3})', 'g');
-  const body = String(srt).split(CR).join('').replace(stamp, '$1.$2');
-  return 'WEBVTT' + String.fromCharCode(10, 10) + body;
 }
 
 // blob URLs of the current lecture's subtitle tracks, revoked on switch
