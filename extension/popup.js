@@ -380,11 +380,6 @@ async function checkHealth() {
 
     pill.textContent = `api ok · ${h.active}/${h.max_jobs} busy`;
     pill.className = "pill pill-ok";
-    if (h.keyfile_entries === 0) {
-      setBanner("keyfile.json is empty — DRM-protected lectures will fail. Non-DRM courses are fine.", "info");
-    } else if (h.keyfile_entries === -1) {
-      setBanner("keyfile.json is missing or malformed.", "info");
-    }
     return h;
   } catch (err) {
     pill.textContent = "offline";

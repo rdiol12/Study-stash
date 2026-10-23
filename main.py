@@ -27,7 +27,6 @@ from tqdm import tqdm
 
 from constants import *
 from tls import SSLCiphers
-from utils import extract_kid
 from vtt_to_srt import convert
 
 DOWNLOAD_DIR = os.path.join(os.getcwd(), "out_dir")
@@ -379,14 +378,6 @@ def pre_run():
     Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
     Path(SAVED_DIR).mkdir(parents=True, exist_ok=True)
 
-    # Get the keys
-    if os.path.exists(KEY_FILE_PATH):
-        with open(KEY_FILE_PATH, encoding="utf8", mode="r") as keyfile:
-            keys = json.loads(keyfile.read())
-    else:
-        logger.warning(
-            "> Keyfile not found! You won't be able to decrypt any encrypted videos!"
-        )
 
     # Process the chapter filter
     if args.chapter_filter_raw:
@@ -1296,162 +1287,6 @@ def durationtoseconds(period):
         return None
 
 
-def mux_process(
-    video_filepath: str,
-    audio_filepath: str,
-    video_title: str,
-    output_path: str,
-    audio_key: Union[str | None] = None,
-    video_key: Union[str | None] = None,
-):
-    codec = "hevc_nvenc" if use_nvenc else "libx265"
-    transcode = "-hwaccel cuda -hwaccel_output_format cuda" if use_nvenc else ""
-    # -crf is an x265 private option; nvenc does not define it, so ffmpeg warns
-    # "has not been used for any stream" and encodes at its own default. The
-    # nvenc equivalent constant-quality knob is -cq.
-    quality_arg = f"-cq {h265_crf}" if use_nvenc else f"-crf {h265_crf}"
-    audio_decryption_arg = (
-        f"-decryption_key {audio_key}" if audio_key is not None else ""
-    )
-    video_decryption_arg = (
-        f"-decryption_key {video_key}" if video_key is not None else ""
-    )
-
-    if os.name == "nt":
-        if use_h265:
-            command = f'ffmpeg {transcode} -y {video_decryption_arg} -i "{video_filepath}" {audio_decryption_arg} -i "{audio_filepath}" -c:v {codec} -vtag hvc1 {quality_arg} -preset {h265_preset} -c:a copy -fflags +bitexact -shortest -map_metadata -1 -metadata title="{video_title}" -metadata comment="Downloaded with Udemy-Downloader by Puyodead1 (https://github.com/Puyodead1/udemy-downloader)" "{output_path}"'
-        else:
-            command = f'ffmpeg -y {video_decryption_arg} -i "{video_filepath}" {audio_decryption_arg} -i "{audio_filepath}" -c copy -fflags +bitexact -shortest -map_metadata -1 -metadata title="{video_title}" -metadata comment="Downloaded with Udemy-Downloader by Puyodead1 (https://github.com/Puyodead1/udemy-downloader)" "{output_path}"'
-    else:
-        if use_h265:
-            command = f'nice -n 7 ffmpeg {transcode} -y {video_decryption_arg} -i "{video_filepath}" {audio_decryption_arg} -i "{audio_filepath}" -c:v {codec} -vtag hvc1 {quality_arg} -preset {h265_preset} -c:a copy -fflags +bitexact -shortest -map_metadata -1 -metadata title="{video_title}" -metadata comment="Downloaded with Udemy-Downloader by Puyodead1 (https://github.com/Puyodead1/udemy-downloader)" "{output_path}"'
-        else:
-            command = f'nice -n 7 ffmpeg -y {video_decryption_arg} -i "{video_filepath}" {audio_decryption_arg} -i "{audio_filepath}" -c copy -fflags +bitexact -shortest -map_metadata -1 -metadata title="{video_title}" -metadata comment="Downloaded with Udemy-Downloader by Puyodead1 (https://github.com/Puyodead1/udemy-downloader)" "{output_path}"'
-
-    process = subprocess.Popen(command, shell=True)
-    log_subprocess_output("FFMPEG-STDOUT", process.stdout)
-    log_subprocess_output("FFMPEG-STDERR", process.stderr)
-    ret_code = process.wait()
-    if ret_code != 0:
-        raise Exception("Muxing returned a non-zero exit code")
-
-    return ret_code
-
-
-def handle_segments(url, format_id, lecture_id, video_title, output_path, chapter_dir):
-    os.chdir(os.path.join(chapter_dir))
-
-    video_filepath_enc = lecture_id + ".encrypted.mp4"
-    audio_filepath_enc = lecture_id + ".encrypted.m4a"
-    temp_output_path = os.path.join(chapter_dir, lecture_id + ".mp4")
-
-    logger.info("> Downloading Lecture Tracks...")
-    args = [
-        "yt-dlp",
-        "--force-generic-extractor",
-        "--allow-unplayable-formats",
-        "--concurrent-fragments",
-        f"{concurrent_downloads}",
-        "--downloader",
-        "aria2c",
-        "--downloader-args",
-        'aria2c:"--disable-ipv6"',
-        "--fixup",
-        "never",
-        "-k",
-        "-o",
-        f"{lecture_id}.encrypted.%(ext)s",
-        "-f",
-        format_id,
-        f"{url}",
-    ]
-    process = subprocess.Popen(args)
-    log_subprocess_output("YTDLP-STDOUT", process.stdout)
-    log_subprocess_output("YTDLP-STDERR", process.stderr)
-    ret_code = process.wait()
-    logger.info("> Lecture Tracks Downloaded")
-
-    if ret_code != 0:
-        logger.warning("Return code from the downloader was non-0 (error), skipping!")
-        return
-
-    audio_kid = None
-    video_kid = None
-
-    try:
-        video_kid = extract_kid(video_filepath_enc)
-        logger.info("KID for video file is: " + video_kid)
-    except Exception:
-        logger.exception(f"Error extracting video kid")
-        return
-
-    try:
-        audio_kid = extract_kid(audio_filepath_enc)
-        logger.info("KID for audio file is: " + audio_kid)
-    except Exception:
-        logger.exception(f"Error extracting audio kid")
-        return
-
-    if audio_kid is not None:
-        try:
-            audio_key = keys[audio_kid]
-        except KeyError:
-            logger.error(
-                f"Audio key not found for {audio_kid}, if you have the key then you probably didn't add them to the key file correctly."
-            )
-            return
-
-    if video_kid is not None:
-        try:
-            video_key = keys[video_kid]
-        except KeyError:
-            logger.error(
-                f"Video key not found for {audio_kid}, if you have the key then you probably didn't add them to the key file correctly."
-            )
-            return
-
-    try:
-        # logger.info("> Decrypting video, this might take a minute...")
-        # ret_code = decrypt(video_kid, video_filepath_enc, video_filepath_dec)
-        # if ret_code != 0:
-        #     logger.error("> Return code from the decrypter was non-0 (error), skipping!")
-        #     return
-        # logger.info("> Decryption complete")
-        # logger.info("> Decrypting audio, this might take a minute...")
-        # decrypt(audio_kid, audio_filepath_enc, audio_filepath_dec)
-        # if ret_code != 0:
-        #     logger.error("> Return code from the decrypter was non-0 (error), skipping!")
-        #     return
-        # logger.info("> Decryption complete")
-        logger.info("> Merging video and audio, this might take a minute...")
-        mux_process(
-            video_filepath_enc,
-            audio_filepath_enc,
-            video_title,
-            temp_output_path,
-            audio_key,
-            video_key,
-        )
-        if ret_code != 0:
-            logger.error("> Return code from ffmpeg was non-0 (error), skipping!")
-            return
-        logger.info("> Merging complete, renaming final file...")
-        os.rename(temp_output_path, output_path)
-        logger.info("> Cleaning up temporary files...")
-        os.remove(video_filepath_enc)
-        os.remove(audio_filepath_enc)
-    except Exception as e:
-        logger.exception(f"Muxing error: {e}")
-    finally:
-        os.chdir(HOME_DIR)
-        # if the url is a file url, we need to remove the file after we're done with it
-        if url.startswith("file://"):
-            try:
-                os.unlink(url[7:])
-            except:
-                pass
-
-
 def check_for_aria():
     try:
         subprocess.Popen(
@@ -1478,23 +1313,6 @@ def check_for_ffmpeg():
     except Exception:
         logger.exception(
             "> Unexpected exception while checking for FFMPEG, please tell the program author about this! "
-        )
-        return True
-
-
-def check_for_shaka():
-    try:
-        subprocess.Popen(
-            ["shaka-packager", "-version"],
-            stderr=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-        ).wait()
-        return True
-    except FileNotFoundError:
-        return False
-    except Exception:
-        logger.exception(
-            "> Unexpected exception while checking for shaka-packager, please tell the program author about this! "
         )
         return True
 
@@ -1602,26 +1420,10 @@ def process_lecture(lecture, lecture_path, chapter_dir):
     lecture_sources = lecture.get("video_sources")
 
     if is_encrypted:
-        if len(lecture_sources) > 0:
-            source = lecture_sources[-1]  # last index is the best quality
-            if isinstance(quality, int):
-                source = min(
-                    lecture_sources, key=lambda x: abs(int(x.get("height")) - quality)
-                )
-            logger.info(
-                f"      > Lecture '{lecture_title}' has DRM, attempting to download. Selected quality: {source.get('height')}"
-            )
-            handle_segments(
-                source.get("download_url"),
-                source.get("format_id"),
-                str(lecture_id),
-                lecture_title,
-                lecture_path,
-                chapter_dir,
-            )
-        else:
-            logger.info(f"      > Lecture '{lecture_title}' is missing media links")
-            logger.debug(f"Lecture source count: {len(lecture_sources)}")
+        # DRM support removed from this build: protected lectures are skipped
+        logger.info(
+            f"      > Lecture '{lecture_title}' is DRM-protected — skipping (no DRM support in this build)"
+        )
     else:
         sources = lecture.get("sources")
         sources = sorted(sources, key=lambda x: int(x.get("height")), reverse=True)
@@ -2302,10 +2104,6 @@ def main():
         logger.fatal("> FFMPEG is missing from your system or path!")
         sys.exit(1)
 
-    shaka_ret_val = check_for_shaka()
-    if not shaka_ret_val and not skip_lectures:
-        logger.fatal("> Shaka Packager is missing from your system or path!")
-        sys.exit(1)
 
     if load_from_file:
         logger.info(

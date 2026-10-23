@@ -41,4 +41,3 @@ services:
       - ./output:/app/out_dir:rw
       - ./saved:/app/saved:rw
       - ./logs:/app/logs:rw
-      - ./keyfile.json:/app/keyfile.json:ro

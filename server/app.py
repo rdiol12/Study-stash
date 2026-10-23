@@ -21,7 +21,6 @@ OUT_DIR = os.environ.get("UD_OUT_DIR", os.path.join(APP_DIR, "out_dir"))
 # Host drive bind-mounted here; the extension browses it to pick a destination.
 LIBRARY = os.environ.get("UD_LIBRARY", "/library")
 COOKIE_PATH = os.path.join(APP_DIR, "cookies.txt")
-KEYFILE_PATH = os.path.join(APP_DIR, "keyfile.json")
 API_TOKEN = os.environ.get("UD_API_TOKEN", "").strip()
 MAX_JOBS = max(1, int(os.environ.get("UD_MAX_JOBS", "1")))
 LOG_CAP = max(200, int(os.environ.get("UD_LOG_CAP", "4000")))
@@ -564,21 +563,13 @@ def gpu_info(refresh=False):
 
 @app.get("/api/health")
 def health():
-    keys = 0
-    try:
-        import json as _json
-        with open(KEYFILE_PATH, encoding="utf-8") as fh:
-            keys = len(_json.load(fh))
-    except Exception:
-        keys = -1
     return jsonify(
         ok=True,
         auth_required=bool(API_TOKEN),
         out_dir=OUT_DIR,
         max_jobs=MAX_JOBS,
         active=runner.active,
-        keyfile_entries=keys,
-        tools={n: _which(n) for n in ("ffmpeg", "aria2c", "shaka-packager", "yt-dlp")},
+        tools={n: _which(n) for n in ("ffmpeg", "aria2c", "yt-dlp")},
         gpu=gpu_info(refresh=request.args.get("refresh") == "1"),
         library={
             "path": LIBRARY,

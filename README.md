@@ -1,3 +1,5 @@
+<p align="center"><a href="https://www.buymeacoffee.com/rdiol12" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="60" width="217"></a></p>
+
 <div align="center">
 
 # 🎓 Udemy Downloader Bridge
@@ -31,7 +33,7 @@ Docker engine when you want the heavy artillery.
 | **Subtitles** | Downloaded captions appear in the player's CC menu |
 | **Interactive quizzes** | Exam & practice modes, timer, attempt history — fully offline |
 | **Your files, your names** | `Course/01 - Section/001. Lecture name.mp4` — anywhere on disk |
-| **Optional Docker engine** | Native ffmpeg 1080p, DRM with *your own* keys, NVIDIA H.265 |
+| **Optional Docker engine** | Native ffmpeg 1080p and bulk downloads via the upstream engine |
 
 ## Quick start
 
@@ -52,17 +54,15 @@ the full Docker setup.
 |---|---|---|
 | Install | none | Docker Desktop |
 | 1080p | ✅ in-browser transmux | ✅ native ffmpeg (faster) |
-| DRM lectures | ❌ skipped | ✅ with your own keys |
-| H.265 / GPU encode | ❌ | ✅ NVENC |
+| DRM lectures | skipped | skipped |
 | Resume interrupted course | re-downloads | skips existing files |
 
-**Start with the extension alone** — add Docker only when you need DRM, GPU
-encoding, or bulk speed.
+**Start with the extension alone** — add Docker when you want native-speed
+1080p or bulk downloads.
 
 ## Credits
 
-The downloader core — course parsing, DASH/HLS handling, DRM decryption,
-muxing — and the quiz player template are the work of
+The downloader core — course parsing, DASH/HLS handling and muxing — and the quiz player template are the work of
 **[Puyodead1/udemy-downloader](https://github.com/Puyodead1/udemy-downloader)**
 and its contributors. This project would not exist without it; its full
 commit history is preserved in this repo. In-browser TS→MP4 remuxing is
@@ -80,9 +80,8 @@ the next feature:
 ## Disclaimer
 
 Downloading courses violates Udemy's Terms of Service — use at your own risk,
-only for content **you are enrolled in**. This project does **not** obtain,
-derive, or capture DRM keys; protected lectures are skipped unless you supply
-your own.
+only for content **you are enrolled in**. This build contains **no DRM
+circumvention code**: protected lectures are detected and skipped.
 
 ## License
 

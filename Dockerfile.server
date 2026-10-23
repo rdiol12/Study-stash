@@ -73,29 +73,6 @@ PY
 RUN ffmpeg -hide_banner -encoders | grep -q hevc_nvenc \
     && echo "ffmpeg has hevc_nvenc"
 
-# Shaka Packager, installed under the name main.py shells out to. Version
-# pinned (verified to exist) so no jq/GitHub-API round trip is needed.
-ARG SHAKA_VERSION=v3.9.3
-RUN <<'PY' python
-import os, shutil, sys, time, urllib.request
-ver = os.environ.get("SHAKA_VERSION") or "v3.9.3"
-URL = (f"https://github.com/shaka-project/shaka-packager/releases/download/"
-       f"{ver}/packager-linux-x64")
-dst = "/usr/local/bin/shaka-packager"
-for attempt in range(1, 16):
-    try:
-        with urllib.request.urlopen(URL, timeout=180) as r, open(dst, "wb") as f:
-            shutil.copyfileobj(r, f, 1 << 18)
-        break
-    except Exception as exc:
-        print(f"shaka attempt {attempt} failed: {exc}", flush=True)
-        time.sleep(5)
-else:
-    sys.exit("shaka-packager download failed after 15 attempts")
-os.chmod(dst, 0o755)
-PY
-RUN shaka-packager --version || true
-
 COPY . /app
 
 ENV PYTHONUNBUFFERED=1 \

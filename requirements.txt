@@ -2,13 +2,11 @@ mpegdash
 tqdm
 requests
 python-dotenv
-protobuf
 webvtt-py
 pysrt
 m3u8
 colorama
 yt-dlp
-bitstring
 unidecode
 beautifulsoup4
 lxml
