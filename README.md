@@ -68,15 +68,6 @@ and its contributors. This project would not exist without it; its full
 commit history is preserved in this repo. In-browser TS→MP4 remuxing is
 powered by [mux.js](https://github.com/videojs/mux.js) (Video.js project).
 
-## ☕ Support this project
-
-If this saved you hours of clicking through lectures online, consider fueling
-the next feature:
-
-<a href="https://www.buymeacoffee.com/rdiol12" target="_blank"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee" height="32"></a>
-
-…and a ⭐ on the repo is always free.
-
 ## License
 
 [MIT](LICENSE) — same as upstream.
