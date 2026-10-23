@@ -1,0 +1,33 @@
+name: checks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 detects ES module syntax on its own, so --check works on the
+      # extension's import/export files without a package.json "type" field.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Matches the python:3.12 base image in Dockerfile.server.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: node --check extension/*.js
+        run: |
+          for f in extension/*.js; do
+            echo "$f"
+            node --check "$f"
+          done
+
+      - name: python -m py_compile
+        run: git ls-files -z '*.py' | xargs -0 python -m py_compile
