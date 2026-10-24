@@ -8,8 +8,7 @@
 
 **Download your Udemy courses. Watch them offline. Keep your progress.**
 
-A browser extension that downloads the courses you're enrolled in — including
-**Widevine DRM** lectures — decrypts and muxes them entirely in your browser, and
+A browser extension that downloads the courses you're enrolled in decrypts and muxes them entirely in your browser, and
 saves them straight to a folder you choose. No cloud, no account, no server.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
