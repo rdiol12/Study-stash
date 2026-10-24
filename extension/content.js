@@ -194,9 +194,10 @@
     const failed = items.filter((i) => i.status === "failed").length;
     const running = items.filter((i) => i.status === "running").length;
 
-    // stop polling a while after everything finishes (runs every tick)
+    // Track activity for the poll rate. Don't stop — keep a slow heartbeat so
+    // clears/removals elsewhere (popup "Clear finished") are reflected here.
     if (running || items.some((i) => i.status === "queued")) idleRounds = 0;
-    else if (++idleRounds > 8) stopPolling();
+    else idleRounds += 1;
 
     // Only touch the DOM when something actually changed, else the per-poll
     // rebuild makes the whole list blink.
@@ -267,14 +268,22 @@
     }
   }
 
+  // Self-scheduling loop: 1.5s while anything is active, 5s when idle. It never
+  // stops (cheap — redraws are skipped unless the data changed), so a clear in
+  // the popup is reflected here within a few seconds instead of lingering.
+  function loop() {
+    poll().finally(() => {
+      const rate = idleRounds > 8 ? 5000 : 1500;
+      pollTimer = setTimeout(loop, rate);
+    });
+  }
   function startPolling() {
     idleRounds = 0;
-    poll();
-    if (!pollTimer) pollTimer = setInterval(poll, 1500);
+    if (!pollTimer) loop();
   }
 
   function stopPolling() {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     pollTimer = null;
   }
 

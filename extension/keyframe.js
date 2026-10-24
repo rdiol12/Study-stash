@@ -8,7 +8,7 @@
 // callers (grabUdemyCourse / grabTab / the UI) are unchanged.
 
 import { registerDownloadName } from "./name-guard.js";
-import { getSettings } from "./common.js";
+import { getSettings, setCourseRoot } from "./common.js";
 import { nativeWriteFile } from "./native.js";
 import { acquireSlot, releaseSlot } from "./gate.js";
 import "./wvcdm.js"; // runs its IIFE -> self.WVCDM in the service worker (the
@@ -180,7 +180,20 @@ async function download(job) {
 
     await saveJob({ id, status: "done", percent: 100, bytes: res.size, height: res.height, output: finalPath, downloadId });
     emit("job.completed", { id, job_id: id, output: finalPath, title: job.title });
-    await registerCompleted({ job_id: id, output: finalPath, title: job.title }).catch(() => {});
+    // Udemy course flow: the manifest already holds one course card with every
+    // lecture — just point it at the folder. Only standalone/manual DRM (no
+    // job.course) registers its own library card.
+    if (job.course) {
+      const relParts = String(job.moveRel || "").split("/");       // course/chapter/lecture.mp4
+      const manifestRel = relParts.slice(1).join("\\");            // chapter\lecture.mp4
+      const fp = String(finalPath).replace(/\//g, "\\");
+      const root = manifestRel && fp.toLowerCase().endsWith(manifestRel.toLowerCase())
+        ? fp.slice(0, fp.length - manifestRel.length).replace(/[\\]+$/, "")
+        : null;
+      if (root) await setCourseRoot(job.course, root).catch(() => {});
+    } else {
+      await registerCompleted({ job_id: id, output: finalPath, title: job.title }).catch(() => {});
+    }
   } catch (err) {
     await saveJob({ id, status: "failed", error: err.message });
     emit("job.failed", { id, error: err.message });
