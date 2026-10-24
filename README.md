@@ -42,7 +42,7 @@ the above.
 
 | | |
 |---|---|
-| **One button** | Downloads every lecture of a course you're enrolled in — DRM and non-DRM together |
+| **One button** | Downloads every lecture of a course you're enrolled in  |
 | **Widevine DRM, in-browser** | A pure-JavaScript L3 CDM resolves keys with **your own** `.wvd` device, decrypts (cenc/cbcs) and muxes — no Python, no external tools |
 | **Real quality** | Progressive, or **1080p** transmuxed in-browser — never re-encoded |
 | **Saves where you want** | With the tiny native helper, files are written straight to any folder (e.g. `A:\udemycourses\<Course>\…`), no browser "Save As" prompts |
