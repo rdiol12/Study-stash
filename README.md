@@ -43,7 +43,6 @@ the above.
 | | |
 |---|---|
 | **One button** | Downloads every lecture of a course you're enrolled in  |
-| **Widevine DRM, in-browser** | A pure-JavaScript L3 CDM resolves keys with **your own** `.wvd` device, decrypts (cenc/cbcs) and muxes — no Python, no external tools |
 | **Real quality** | Progressive, or **1080p** transmuxed in-browser — never re-encoded |
 | **Saves where you want** | With the tiny native helper, files are written straight to any folder (e.g. `A:\udemycourses\<Course>\…`), no browser "Save As" prompts |
 | **Subtitles → SRT** | Captions are converted to `.srt` automatically (keep `.vtt` if you prefer) |
@@ -76,18 +75,9 @@ Needs **Python 3** on PATH. In the repo folder, PowerShell:
 ```powershell
 powershell -ExecutionPolicy Bypass -File native\install.ps1 -ExtensionId <your-extension-id>
 ```
-Then restart the browser. (Without this, files land in your Downloads folder.)
+Then restart the browser. (Without this, files land in your Downloads folder
 
-**4. (For DRM courses) add your CDM** — drop your own Widevine **L3** `.wvd`
-device file at:
-
-```text
-extension/cdm/device.wvd
-```
-It loads automatically. You can also load one at runtime from the Keyframe page
-("Load .wvd…"). The project ships **no** CDM — bring your own.
-
-**5. Download**
+**4. Download**
 
 ```text
 Open a Udemy course you're enrolled in → click the extension → set your
