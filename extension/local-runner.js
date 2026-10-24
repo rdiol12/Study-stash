@@ -134,17 +134,27 @@ export async function startLocalJob(plan, opts = {}) {
     const present = await nativeExists(want);
     dl.forEach((it, i) => { if (present[want[i]]) { delete it.url; it.skipped = "already downloaded"; } });
   }
-  // Captions: fetch + VTT->SRT convert + write straight to the folder via the
-  // helper, so they never hit chrome.downloads (whose data-URL path pops a
-  // Save As dialog in Brave). Videos/assets stay on the normal path.
+  // Captions (VTT->SRT convert) and quizzes (data: URL HTML) write straight to
+  // the folder via the helper, so they never hit chrome.downloads — whose
+  // data-URL path pops a Save As dialog in Brave and names files with a UUID.
+  // Plain http videos/assets stay on the normal download path.
   if (opts.nativeTarget) {
     const relOf = (p) => opts.nativeTarget.replace(/[\/\\]+$/, "") + "\\" + p.replace(/\\/g, "/").split("/").slice(1).join("/").replace(/\//g, "\\");
     for (const it of items) {
-      if (it.convert !== "srt" || !it.url || it.skipped) continue;
+      if (it.skipped || !it.url) continue;
+      const isCaption = it.convert === "srt";
+      const isData = it.url.startsWith("data:");
+      if (!isCaption && !isData) continue; // leave http videos/assets alone
       try {
-        const resp = await fetch(it.url, { credentials: "include" });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const u8 = new TextEncoder().encode(vttToSrt(await resp.text()));
+        let u8;
+        if (isCaption) {
+          const resp = await fetch(it.url, { credentials: "include" });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          u8 = new TextEncoder().encode(vttToSrt(await resp.text()));
+        } else {
+          // data: URL (e.g. the quiz HTML) — fetch decodes it to its bytes
+          u8 = new Uint8Array(await (await fetch(it.url)).arrayBuffer());
+        }
         const dest = relOf(it.path);
         let sent = false;
         await nativeWriteFile(dest, async () => {
@@ -154,7 +164,7 @@ export async function startLocalJob(plan, opts = {}) {
           return btoa(s);
         });
         it.doneNative = true; it.abs = dest; delete it.url;
-      } catch { /* leave it on the chrome.downloads path as a .vtt fallback */ }
+      } catch { /* leave it on the chrome.downloads path as a fallback */ }
     }
   }
   // a job with nothing in it would appear and complete instantly -- noise

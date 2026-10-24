@@ -366,7 +366,7 @@ export function buildPlan(items, courseTitle, opts = {}) {
 
     if (item._class === "quiz") {
       chapter.lectures.push({
-        name: `${pad(counter, 3)}. ${sanitize(item.title)}`,
+        name: `${counter}. ${sanitize(item.title)}`,
         kind: "quiz",
         quizId: item.id,
         // coding-exercise uses a different player upstream; not supported here
@@ -378,7 +378,7 @@ export function buildPlan(items, courseTitle, opts = {}) {
       continue;
     }
     const asset = item.asset || {};
-    const name = `${pad(counter, 3)}. ${sanitize(item.title)}`;
+    const name = `${counter}. ${sanitize(item.title)}`;
 
     if ((asset.asset_type || "").toLowerCase() !== "video") {
       chapter.lectures.push({ name, kind: "non-video", assets: assetsOf(item) });

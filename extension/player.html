@@ -55,7 +55,9 @@
       #course { display: none; flex: 1; min-height: 0; }
       #course.active { display: flex; }
       #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #000; }
-      video { width: 100%; flex: 1; min-height: 0; outline: none; background: #000; }
+      video { width: 100%; flex: 1; min-height: 0; outline: none; background: #000; object-fit: contain; }
+      /* fill the screen (no letterbox) in fullscreen or when the sidebar is hidden */
+      #course.aside-hidden video, #course:fullscreen video { object-fit: cover; }
       /* the purple strip is the seek bar; hide only the native timeline so
          play/volume/fullscreen stay native. Chromium still honours these
          pseudo-element selectors even though the controls are shadow DOM. */
@@ -98,12 +100,21 @@
         display: flex; align-items: center; gap: 10px; padding: 8px 14px;
         background: var(--panel); flex: 0 0 auto;
       }
-      #nowPlaying { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #titleBar {
+        flex: 0 0 auto; padding: 9px 16px; background: var(--panel);
+        border-bottom: 1px solid #000; font-size: 14px; font-weight: 600;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      #course:fullscreen #titleBar { display: none; }
       #controls button, #controls select {
         background: none; border: 1px solid var(--panel2); color: var(--fg);
         border-radius: 4px; padding: 5px 10px; font-size: 12.5px; cursor: pointer;
       }
       #controls button:hover { background: var(--panel2); }
+      /* native <select> popups are OS-white; set an explicit dark bg + option
+         colors so the dropdown text isn't white-on-white */
+      #controls select { background: var(--panel2); color: var(--fg); }
+      #controls select option { background: var(--panel); color: var(--fg); }
 
       aside {
         width: 380px; flex: 0 0 auto; background: var(--panel);
@@ -114,6 +125,24 @@
         border-bottom: 1px solid var(--line); position: sticky; top: 0;
         background: var(--panel); z-index: 1;
       }
+      #asideToggle {
+        position: absolute; top: 8px; right: 8px; z-index: 7;
+        width: 30px; height: 30px; border-radius: 6px; border: 0; cursor: pointer;
+        background: rgba(17,22,28,.8); color: #e8edf2; font-size: 15px; line-height: 1;
+      }
+      #asideToggle:hover { background: rgba(17,22,28,.95); }
+      #course.aside-hidden aside { display: none; }
+      .navArrow {
+        position: absolute; top: 50%; transform: translateY(-50%); z-index: 6;
+        width: 48px; height: 72px; border: 0; border-radius: 8px; cursor: pointer;
+        background: rgba(17,22,28,.55); color: #fff; font-size: 34px; line-height: 1;
+        opacity: 0; transition: opacity .6s ease; pointer-events: none;
+      }
+      .navArrow:hover { background: rgba(17,22,28,.85); }
+      #navPrev { left: 14px; }
+      #navNext { right: 14px; }
+      #course.nav-show .navArrow { opacity: 1; pointer-events: auto; transition: opacity .15s ease; }
+      .navArrow.navHidden { display: none; }
       details.section { border-bottom: 1px solid var(--line); }
       details.section > summary {
         list-style: none; cursor: pointer; padding: 12px 16px;
@@ -137,6 +166,18 @@
       .item.done .tick { background: var(--fg); border-color: var(--fg); }
       .item .label { flex: 1; min-width: 0; }
       .item .sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+      .resources { display: flex; flex-direction: column; gap: 4px; padding: 2px 16px 8px 42px; }
+      .res {
+        color: var(--muted); font-size: 12px; text-decoration: none;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .res:hover { color: var(--fg); text-decoration: underline; }
+      .resBadge {
+        flex: 0 0 auto; align-self: center; border: 0; cursor: pointer;
+        background: var(--panel2); color: var(--muted); border-radius: 4px;
+        padding: 3px 7px; font-size: 11px; margin-left: 6px;
+      }
+      .resBadge:hover { color: var(--fg); }
       .item.drm { opacity: 0.45; cursor: default; }
       .banner {
         margin: 14px; padding: 10px 12px; border-radius: 6px;
@@ -144,7 +185,46 @@
         white-space: pre-line;
       }
       .hiddenEl { display: none !important; }
+      #stage { position: relative; }
+      .cc-group { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
+      .cc-group label { color: var(--muted, #9aa6b3); font-size: 12px; }
+      #nextPrompt {
+        position: absolute; right: 16px; bottom: 90px; z-index: 5;
+        display: flex; align-items: center; gap: 10px;
+        background: rgba(17,22,28,.92); color: #e8edf2; padding: 10px 14px;
+        border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.4); font-size: 13px;
+      }
+      #nextPrompt button {
+        border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer;
+        background: #11698e; color: #fff; font: inherit;
+      }
+      #nextPrompt #nextPromptCancel { background: #27333d; color: #9aa6b3; }
+
+      /* Fullscreen: the stage fills the screen; our chrome hides until the
+         mouse reaches the bottom, then slides up. Esc exits (browser default). */
+      /* Fullscreen covers the whole course (stage + sidebar) so the sidebar can
+         be opened without leaving fullscreen. Everything hides after 4s idle
+         (no .nav-show) and reappears on mouse move. */
+      #course:fullscreen { background: #000; cursor: none; }
+      #course:fullscreen.nav-show { cursor: default; }
+      #course:fullscreen #stage { flex: 1; min-width: 0; }
+      #course:fullscreen #video { width: 100%; height: 100%; object-fit: cover; }
+      #course:fullscreen #seekwrap,
+      #course:fullscreen #controls,
+      #course:fullscreen #asideToggle {
+        position: absolute; z-index: 7;
+        opacity: 0; transition: opacity .3s ease; pointer-events: none;
+      }
+      #course:fullscreen #seekwrap { left: 0; right: 0; bottom: 54px; }
+      #course:fullscreen #controls { left: 0; right: 0; bottom: 0; background: rgba(17,22,28,.94); padding: 10px 16px; margin: 0; }
+      #course:fullscreen.nav-show #seekwrap,
+      #course:fullscreen.nav-show #controls,
+      #course:fullscreen.nav-show #asideToggle { opacity: 1; pointer-events: auto; }
+      #course:fullscreen #nextPrompt { bottom: 76px; }
+      /* sidebar becomes an overlay on the right so the video stays full */
+      #course:fullscreen aside { position: absolute; right: 0; top: 0; bottom: 0; width: 360px; z-index: 8; box-shadow: -4px 0 16px rgba(0,0,0,.5); }
     </style>
+    <style id="capStyle"></style>
   </head>
   <body>
     <header>
@@ -157,6 +237,10 @@
 
     <div id="course">
       <div id="stage">
+        <div id="titleBar"><span id="nowPlaying"></span></div>
+        <button id="asideToggle" title="Hide/show course content">»</button>
+        <button id="navPrev" class="navArrow" title="Previous lecture">‹</button>
+        <button id="navNext" class="navArrow" title="Next lecture">›</button>
         <video id="video" controls preload="metadata"></video>
         <div id="seekwrap">
           <div id="seekpreview">
@@ -166,7 +250,6 @@
           <div id="seektrack"><div id="seekfill"></div></div>
         </div>
         <div id="controls">
-          <span id="nowPlaying"></span>
           <select id="speed">
             <option value="0.75">0.75×</option>
             <option value="1" selected>1×</option>
@@ -177,6 +260,26 @@
           </select>
           <button id="prev">‹ Prev</button>
           <button id="next">Next ›</button>
+          <button id="fs" title="Fullscreen (F)">⛶</button>
+          <span class="cc-group">
+            <label for="capSize">CC</label>
+            <select id="capSize" title="Subtitle size">
+              <option value="80">Small</option>
+              <option value="100" selected>Normal</option>
+              <option value="135">Large</option>
+              <option value="175">Huge</option>
+            </select>
+            <select id="capBg" title="Subtitle background">
+              <option value="semi" selected>Shadowed</option>
+              <option value="box">Box</option>
+              <option value="none">None</option>
+            </select>
+          </span>
+        </div>
+        <div id="nextPrompt" class="hiddenEl">
+          <span id="nextPromptText">Next up</span>
+          <button id="nextPromptGo">Play now</button>
+          <button id="nextPromptCancel">Cancel</button>
         </div>
       </div>
       <aside>

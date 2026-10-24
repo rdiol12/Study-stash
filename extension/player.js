@@ -9,6 +9,7 @@
 
 const COURSES_KEY = "courses";
 const PROGRESS_KEY = "playerProgress";
+const SETTINGS_KEY = "playerSettings"; // speed/volume, persisted across videos + reloads
 const DONE_AT = 0.95; // Udemy ticks a lecture near the end, not only at 100%
 
 const $ = (id) => document.getElementById(id);
@@ -17,6 +18,7 @@ const video = $("video");
 const state = {
   courses: {},
   progress: {},
+  settings: { speed: 1, volume: 1 },
   courseId: null,
   playing: null, // rel of the current item
   saveTimer: null,
@@ -25,13 +27,18 @@ const state = {
 // ---------------------------------------------------------------- storage
 
 async function load() {
-  const stored = await chrome.storage.local.get([COURSES_KEY, PROGRESS_KEY]);
+  const stored = await chrome.storage.local.get([COURSES_KEY, PROGRESS_KEY, SETTINGS_KEY]);
   state.courses = stored[COURSES_KEY] || {};
   state.progress = stored[PROGRESS_KEY] || {};
+  state.settings = { speed: 1, volume: 1, ...(stored[SETTINGS_KEY] || {}) };
 }
 
 async function saveProgress() {
   await chrome.storage.local.set({ [PROGRESS_KEY]: state.progress });
+}
+
+async function saveSettings() {
+  await chrome.storage.local.set({ [SETTINGS_KEY]: state.settings });
 }
 
 function prog(courseId) {
@@ -60,7 +67,9 @@ function fileUrl(root, rel) {
 }
 
 function flatVideos(course) {
-  return course.sections.flatMap((s) => s.items).filter((i) => i.kind === "video" && !i.drm);
+  // DRM lectures are decrypted to plain .mp4 at the same path, so they count
+  // and play like any other video.
+  return course.sections.flatMap((s) => s.items).filter((i) => i.kind === "video");
 }
 
 function courseStats(course) {
@@ -236,9 +245,14 @@ function captureFromBlob(src) {
 
 // ---------------------------------------------------------------- course view
 
+// Per-section collapse state the user set (by section title), kept across
+// re-renders. Cleared when a different course is opened.
+const sectionOpen = new Map();
+
 async function openCourse(courseId) {
   const course = state.courses[courseId];
   if (!course) return;
+  if (state.courseId !== courseId) sectionOpen.clear();
   state.courseId = courseId;
 
   $("library").classList.add("hiddenEl");
@@ -291,20 +305,60 @@ async function checkFileAccess(course) {
   }
 }
 
+// Read a local file's duration without playing it (metadata only).
+function probeDuration(url) {
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.muted = true;
+    const finish = (d) => { try { v.removeAttribute("src"); v.load(); } catch {} resolve(d); };
+    v.addEventListener("loadedmetadata", () => finish(isFinite(v.duration) ? v.duration : null), { once: true });
+    v.addEventListener("error", () => finish(null), { once: true });
+    v.src = url;
+  });
+}
+
+// Fill in unknown durations from the files on disk, a few at a time, and update
+// the rows in place. Cached in progress, so it only probes once per video.
+async function probeDurations(course, pending) {
+  if (!course.root || !pending.length) return;
+  let i = 0, changed = false;
+  const worker = async () => {
+    while (i < pending.length) {
+      const { rel, sub } = pending[i++];
+      const d = await probeDuration(fileUrl(course.root, rel));
+      if (!d) continue;
+      const ip = itemProg(course.id, rel);
+      if (!ip.d) { ip.d = d; changed = true; }
+      sub.textContent = fmt(d);
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  if (changed) await saveProgress();
+}
+
 function renderSections() {
   const course = state.courses[state.courseId];
   const wrap = $("sections");
   wrap.textContent = "";
+  const durPending = [];
 
   course.sections.forEach((section, si) => {
     const det = document.createElement("details");
     det.className = "section";
-    det.open = section.items.some((i) => i.rel === state.playing) || si === 0;
+    const key = section.title;
+    const containsPlaying = section.items.some((i) => i.rel === state.playing);
+    // remember the user's collapse choice across re-renders; default the first
+    // section (and whichever holds the playing video) open on first sight.
+    if (!sectionOpen.has(key)) sectionOpen.set(key, si === 0 || containsPlaying);
+    if (containsPlaying) sectionOpen.set(key, true); // always reveal what's playing
+    det.open = sectionOpen.get(key);
+    det.addEventListener("toggle", () => sectionOpen.set(key, det.open));
 
     const sum = document.createElement("summary");
     const name = document.createElement("span");
     name.textContent = section.title;
-    const vids = section.items.filter((i) => i.kind === "video" && !i.drm);
+    const vids = section.items.filter((i) => i.kind === "video");
     const doneCount = vids.filter((v) => itemProg(course.id, v.rel).done).length;
     const count = document.createElement("span");
     count.className = "count";
@@ -315,14 +369,14 @@ function renderSections() {
     for (const item of section.items) {
       const row = document.createElement("div");
       const ip = itemProg(course.id, item.rel);
-      row.className = "item" + (ip.done ? " done" : "") + (item.drm ? " drm" : "") +
+      row.className = "item" + (ip.done ? " done" : "") +
         (item.rel === state.playing ? " current" : "");
 
       const tick = document.createElement("span");
       tick.className = "tick";
       tick.textContent = ip.done ? "✓" : "";
       tick.title = ip.done ? "Mark as unwatched (resets position)" : "Mark as watched";
-      if (!item.drm && item.kind === "video") {
+      if (item.kind === "video") {
         tick.addEventListener("click", async (e) => {
           // the per-video reset: unticking clears both the check and the
           // resume position, exactly like re-doing a lecture on Udemy
@@ -339,23 +393,55 @@ function renderSections() {
       label.textContent = item.name;
       const sub = document.createElement("div");
       sub.className = "sub";
-      if (item.drm) sub.textContent = "DRM — not downloaded";
-      else if (item.kind === "quiz") sub.textContent = "Quiz";
+      if (item.kind === "quiz") sub.textContent = "Quiz";
       else if (ip.done) sub.textContent = fmt(ip.d) || "watched";
       else if (ip.t > 1) sub.textContent = `resume at ${fmt(ip.t)}${ip.d ? " / " + fmt(ip.d) : ""}`;
-      else sub.textContent = fmt(ip.d);
+      else if (ip.d) sub.textContent = fmt(ip.d);
+      else if (item.kind === "video") { sub.textContent = "…"; durPending.push({ rel: item.rel, sub }); }
       label.append(sub);
 
       row.append(tick, label);
-      if (!item.drm) {
-        row.addEventListener("click", () =>
-          item.kind === "quiz" ? openQuiz(item) : play(item.rel, { resume: true })
-        );
+
+      // Udemy-style: a 📎 badge on the lecture card, toggling its resources.
+      let resWrap = null;
+      if (item.resources && item.resources.length) {
+        const badge = document.createElement("button");
+        badge.className = "resBadge";
+        badge.textContent = `📎 ${item.resources.length}`;
+        badge.title = "Resources";
+        row.append(badge);
+
+        resWrap = document.createElement("div");
+        resWrap.className = "resources hiddenEl";
+        for (const r of item.resources) {
+          const a = document.createElement("a");
+          a.className = "res";
+          a.href = "#";
+          a.textContent = (r.externalUrl ? "🔗 " : "📎 ") + r.name;
+          a.title = r.name;
+          a.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            chrome.tabs.create({ url: r.externalUrl || fileUrl(course.root, r.rel) });
+          });
+          resWrap.append(a);
+        }
+        badge.addEventListener("click", (e) => {
+          e.stopPropagation();
+          resWrap.classList.toggle("hiddenEl");
+        });
       }
+
+      row.addEventListener("click", () =>
+        item.kind === "quiz" ? openQuiz(item) : play(item.rel, { resume: true })
+      );
       det.append(row);
+      if (resWrap) det.append(resWrap);
     }
     wrap.append(det);
   });
+
+  probeDurations(course, durPending); // fill unknown durations from disk, in place
 }
 
 // ---------------------------------------------------------------- playback
@@ -376,6 +462,10 @@ function play(rel, { resume = false } = {}) {
   if (!item || item.kind !== "video") return;
 
   state.playing = rel;
+  nextCancelledFor = null; // fresh video — re-enable the next-up prompt/autoplay
+  hideNextPrompt();
+  updateNavArrows();
+  pokeNav(); // briefly show the side arrows when a lecture starts
   const p = prog(course.id);
   p.last = rel;
   const ip = itemProg(course.id, rel);
@@ -386,13 +476,17 @@ function play(rel, { resume = false } = {}) {
   previewVideo.src = video.src;
   $("seekfill").style.width = "0%";
   $("nowPlaying").textContent = item.name;
-  video.playbackRate = Number($("speed").value);
+  video.playbackRate = state.settings.speed;
+  video.volume = state.settings.volume;
 
   video.addEventListener(
     "loadedmetadata",
     () => {
       if (video.duration && isFinite(video.duration)) ip.d = video.duration;
       if (resume && ip.t > 1 && ip.t < video.duration - 2) video.currentTime = ip.t;
+      // the browser resets rate/volume when new media loads — re-apply the saved ones
+      video.playbackRate = state.settings.speed;
+      video.volume = state.settings.volume;
       video.play().catch(() => {});
     },
     { once: true }
@@ -436,14 +530,14 @@ async function loadSubtitles(course, item) {
 
   for (const lang of langs) {
     try {
-      // browser mode saves .vtt; container mode converts to .srt -- probe both
+      // we save .srt by default (Keep .vtt leaves .vtt) -- probe .srt first
       let text = null;
-      let res = await fetch(fileUrl(course.root, `${base}.${lang}.vtt`)).catch(() => null);
+      let res = await fetch(fileUrl(course.root, `${base}.${lang}.srt`)).catch(() => null);
       if (res && res.ok) {
-        text = await res.text();
+        text = srtToVtt(await res.text());
       } else {
-        res = await fetch(fileUrl(course.root, `${base}.${lang}.srt`)).catch(() => null);
-        if (res && res.ok) text = srtToVtt(await res.text());
+        res = await fetch(fileUrl(course.root, `${base}.${lang}.vtt`)).catch(() => null);
+        if (res && res.ok) text = await res.text();
       }
       if (!text) continue;
       const blobUrl = URL.createObjectURL(new Blob([text], { type: "text/vtt" }));
@@ -476,6 +570,42 @@ function neighbour(offset) {
   const idx = vids.findIndex((v) => v.rel === state.playing);
   const next = vids[idx + offset];
   if (next) play(next.rel, { resume: true });
+}
+
+function nextVideoItem() {
+  if (!state.courseId) return null;
+  const vids = flatVideos(state.courses[state.courseId]);
+  const idx = vids.findIndex((v) => v.rel === state.playing);
+  return idx >= 0 ? vids[idx + 1] || null : null;
+}
+
+// Subtitle appearance (size + background), persisted; applied via ::cue.
+function applyCaptionStyle() {
+  const c = state.settings.caption || {};
+  const size = Number(c.size) || 100;
+  const bg = c.bg || "semi";
+  const bgCss = bg === "box" ? "rgba(0,0,0,.78)" : "transparent";
+  const shadow = bg === "box" ? "none" : "0 1px 2px #000, 0 0 5px #000";
+  const el = $("capStyle");
+  if (el) el.textContent = `video::cue{font-size:${size}%;background:${bgCss};text-shadow:${shadow};}`;
+  if ($("capSize")) $("capSize").value = String(size);
+  if ($("capBg")) $("capBg").value = bg;
+}
+
+// "Next up in Ns" prompt shown over the last 5 seconds (Cancel stops autoplay).
+let nextCancelledFor = null;
+function hideNextPrompt() { const p = $("nextPrompt"); if (p) p.classList.add("hiddenEl"); }
+function maybeNextPrompt() {
+  const p = $("nextPrompt");
+  if (!p) return;
+  const rem = (video.duration || 0) - video.currentTime;
+  const nxt = nextVideoItem();
+  if (nxt && isFinite(rem) && rem > 0.3 && rem <= 5 && nextCancelledFor !== state.playing) {
+    $("nextPromptText").textContent = `Next: ${nxt.name} — ${Math.ceil(rem)}s`;
+    p.classList.remove("hiddenEl");
+  } else {
+    hideNextPrompt();
+  }
 }
 
 function markTime() {
@@ -539,6 +669,7 @@ video.addEventListener("timeupdate", () => {
   if (video.duration) {
     $("seekfill").style.width = `${(100 * video.currentTime) / video.duration}%`;
   }
+  maybeNextPrompt();
 });
 
 video.addEventListener("ended", () => {
@@ -547,7 +678,9 @@ video.addEventListener("ended", () => {
   ip.t = 0; // next time, start from the top like Udemy does after completion
   saveProgress();
   renderSections();
-  neighbour(1); // autoplay the next lecture
+  const autoplay = nextCancelledFor !== state.playing; // Cancel on the prompt stops it
+  hideNextPrompt();
+  if (autoplay) neighbour(1);
 });
 video.addEventListener("pause", markTime);
 setInterval(() => {
@@ -556,8 +689,64 @@ setInterval(() => {
 window.addEventListener("beforeunload", markTime);
 
 $("speed").addEventListener("change", () => {
-  video.playbackRate = Number($("speed").value);
+  state.settings.speed = Number($("speed").value) || 1;
+  video.playbackRate = state.settings.speed;
+  saveSettings();
 });
+// persist volume (debounced — volumechange fires rapidly while dragging)
+let volTimer = null;
+video.addEventListener("volumechange", () => {
+  state.settings.volume = video.volume;
+  clearTimeout(volTimer);
+  volTimer = setTimeout(saveSettings, 400);
+});
+$("capSize").addEventListener("change", () => {
+  state.settings.caption = { ...(state.settings.caption || {}), size: Number($("capSize").value) || 100 };
+  applyCaptionStyle();
+  saveSettings();
+});
+$("capBg").addEventListener("change", () => {
+  state.settings.caption = { ...(state.settings.caption || {}), bg: $("capBg").value };
+  applyCaptionStyle();
+  saveSettings();
+});
+function toggleFullscreen() {
+  const el = $("course"); // fullscreen the whole course so the sidebar can open inside it
+  if (!el) return;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+}
+$("fs").addEventListener("click", toggleFullscreen);
+document.addEventListener("fullscreenchange", () => pokeNav());
+// Controls + side arrows + cursor: shown on mouse move, hidden after 4s idle.
+let navIdleTimer = null;
+function pokeNav() {
+  $("course").classList.add("nav-show");
+  clearTimeout(navIdleTimer);
+  navIdleTimer = setTimeout(() => $("course").classList.remove("nav-show"), 4000);
+}
+function updateNavArrows() {
+  const vids = state.courseId ? flatVideos(state.courses[state.courseId]) : [];
+  const idx = vids.findIndex((v) => v.rel === state.playing);
+  $("navPrev").classList.toggle("navHidden", !(idx > 0));
+  $("navNext").classList.toggle("navHidden", !(idx >= 0 && idx < vids.length - 1));
+}
+$("navPrev").addEventListener("click", () => neighbour(-1));
+$("navNext").addEventListener("click", () => neighbour(1));
+$("course").addEventListener("mousemove", pokeNav);
+function applyAside() {
+  const hidden = !!state.settings.asideHidden;
+  $("course").classList.toggle("aside-hidden", hidden);
+  $("asideToggle").textContent = hidden ? "«" : "»";
+  $("asideToggle").title = hidden ? "Show course content" : "Hide course content";
+}
+$("asideToggle").addEventListener("click", () => {
+  state.settings.asideHidden = !state.settings.asideHidden;
+  applyAside();
+  saveSettings();
+});
+$("nextPromptGo").addEventListener("click", () => { hideNextPrompt(); neighbour(1); });
+$("nextPromptCancel").addEventListener("click", () => { nextCancelledFor = state.playing; hideNextPrompt(); });
 $("prev").addEventListener("click", () => neighbour(-1));
 $("next").addEventListener("click", () => neighbour(1));
 $("back").addEventListener("click", () => {
@@ -565,6 +754,27 @@ $("back").addEventListener("click", () => {
   state.courseId = null;
   state.playing = null;
   renderLibrary();
+});
+
+// keyboard shortcuts: Space = play/pause, ←/→ = seek 5s (ignored while typing
+// in a control so Space doesn't also toggle a <select>).
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target && e.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "select" || tag === "textarea") return;
+  if (!state.playing) return;
+  if (e.code === "Space" || e.key === " ") {
+    e.preventDefault();
+    if (video.paused) video.play().catch(() => {}); else video.pause();
+  } else if (e.code === "ArrowLeft") {
+    e.preventDefault();
+    video.currentTime = Math.max(0, video.currentTime - 5);
+  } else if (e.code === "ArrowRight") {
+    e.preventDefault();
+    video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 5);
+  } else if (e.key === "f" || e.key === "F") {
+    e.preventDefault();
+    toggleFullscreen();
+  }
 });
 
 // live refresh if a download finishes while this page is open
@@ -577,5 +787,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 (async () => {
   await load();
+  // restore persisted player settings into the UI + video element
+  if ($("speed")) $("speed").value = String(state.settings.speed);
+  video.volume = state.settings.volume;
+  applyCaptionStyle();
+  applyAside();
   renderLibrary();
 })();

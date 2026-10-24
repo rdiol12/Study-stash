@@ -258,9 +258,21 @@ async function saveCourseManifest(plan, opts) {
         kind: l.kind,
         rel: `${ch.title}/${l.name}${l.kind === "quiz" ? ".html" : ".mp4"}`,
         drm: !!l.drm,
-        // caption languages available on Udemy; the player probes which of
-        // these were actually downloaded
-        captions: (l.captions || []).map((c) => c.lang),
+        // only the caption language(s) actually downloaded (matches the lang
+        // filter), so the player doesn't probe — and 404 on — every language
+        captions: (l.captions || [])
+          .map((c) => c.lang)
+          .filter((lang) => {
+            const want = (opts.lang || "en").toLowerCase();
+            return want === "all" || String(lang).toLowerCase().split("_")[0] === want;
+          }),
+        // downloadable attachments for this lecture (shown in the player);
+        // external links keep their URL, files point at the on-disk sibling
+        resources: opts.assets
+          ? (l.assets || []).map((a) => a.externalUrl
+            ? { name: a.name, externalUrl: a.externalUrl }
+            : { name: a.name, rel: `${ch.title}/${l.name} - ${a.name}` })
+          : [],
       })),
   })).filter((s) => s.items.length);
 
