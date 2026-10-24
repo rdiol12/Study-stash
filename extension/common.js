@@ -285,7 +285,13 @@ async function queueLocal({ courseUrl, infoOnly }) {
 
   const course = await findCourse(parsed.portal, parsed.slug);
   const items = await fetchCurriculum(parsed.portal, course.id);
-  const plan = buildPlan(items, course.title);
+  const { prefs: planPrefs } = await getPrefs();
+  const plan = buildPlan(items, course.title, {
+    idAsName: !!planPrefs.id_as_course_name,
+    courseId: course.id,
+    continueNumbers: planPrefs.continue_lecture_numbers !== false,
+    quality: planPrefs.quality,
+  });
 
   if (infoOnly) {
     // probe one lecture's HLS ladder: decides whether 1080p is reachable
@@ -311,6 +317,7 @@ async function queueLocal({ courseUrl, infoOnly }) {
   }
 
   const { prefs, dest } = await getPrefs();
+  const { nativeTarget } = await getSettings();
   const opts = {
     // relative to the browser's download folder, not /library
     // a subfolder of the download location, so ordinary downloads are untouched
@@ -318,9 +325,13 @@ async function queueLocal({ courseUrl, infoOnly }) {
     captions: !!prefs.download_captions,
     assets: !!prefs.download_assets,
     quizzes: !!prefs.download_quizzes,
+    keepVtt: !!prefs.keep_vtt,
     skipLectures: !!prefs.skip_lectures,
     chapter: prefs.chapter,
     lang: prefs.lang,
+    // skip files already on disk in the destination (by name)
+    skipExisting: prefs.skip_existing !== false,
+    nativeTarget: nativeTarget || "",
   };
 
   if (opts.quizzes) await prepareQuizzes(plan, parsed.portal);
@@ -331,14 +342,15 @@ async function queueLocal({ courseUrl, infoOnly }) {
 
   opts.courseTitle = plan.courseTitle;
 
-  if (prefs.hd && !opts.skipLectures) {
+  // skip_hls forces the progressive path (no HLS/transmux), honoring the toggle.
+  if (prefs.hd && !opts.skipLectures && !prefs.skip_hls) {
     // always under the download folder; the native helper moves it after
-    // videos go down the HLS/transmux path for 1080p; captions and assets are
-    // plain files, so they still ride the browser's download manager
+    // videos go down the HLS/transmux path; captions and assets are plain files,
+    // so they still ride the browser's download manager
     const hd = await startHdJob(plan, {
       ...opts,
-      maxHeight: 1080,
-      concurrency: Number(prefs.hd_lanes) || 2,
+      maxHeight: Number(prefs.quality) || 1080, // honor the Quality cap (else 1080p)
+      concurrency: Math.max(Number(prefs.hd_lanes) || 0, 2),
     });
     if (opts.captions || opts.assets || opts.quizzes) {
       // may be null when the filtered chapters contain no extras at all

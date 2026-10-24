@@ -10,8 +10,9 @@ Built on top of [Puyodead1/udemy-downloader](https://github.com/Puyodead1/udemy-
 `git pull` from upstream stays clean.
 
 > Downloading courses is against Udemy's Terms of Service. Use at your own
-> risk, for content you are enrolled in. Nothing here obtains, derives or
-> captures DRM keys.
+> risk, for content you are enrolled in. Modes 1–2 do no decryption. Mode 3
+> (the Keyframe engine) decrypts DRM content you can already access using **your
+> own** Widevine CDM — supply your own device file; this project ships no keys.
 
 ---
 
@@ -123,8 +124,42 @@ want courses on another drive. Add Docker when you want faster, native 1080p.
 
 ---
 
+## Mode 3 — DRM via the Keyframe bridge (self-contained)
+
+Downloads and decrypts Widevine DASH with **your own CDM**, using this project's
+own engine (no external downloader). Full detail in
+[`docs/KEYFRAME-BRIDGE.md`](docs/KEYFRAME-BRIDGE.md); the short version:
+
+1. Install on PATH: **Python 3.11+**, **ffmpeg**, **mp4decrypt** (Bento4).
+   Optionally **shaka-packager** — only needed to decrypt **WebM/Matroska** DRM
+   (Opus/VP9) sources; Udemy itself is MP4, so mp4decrypt covers it.
+2. Register the bridge host once:
+   `powershell -ExecutionPolicy Bypass -File native\install-keyframe.ps1 -ExtensionId <id>`
+   (auto-picks a suitable Python; add `-Python C:\path\to\python.exe` to force one
+   if it grabs the wrong interpreter — e.g. a bare Anaconda without the deps.)
+3. Restart the browser → extension → **Keyframe (DRM)** → **Set up engine**
+   (installs `pywidevine`).
+4. Put your `.wvd` CDM file in `%USERPROFILE%\.keyframe-bridge\cdm` → **Re-check CDM**.
+5. Start playing a DRM video on any page; once the stream is detected the
+   injected **⬇ Download** button appears. One press resolves keys, decrypts,
+   muxes, and the file lands in **My courses**. (Or paste a manifest + license
+   URL in the Keyframe page.)
+
+Notes: `pywidevine` is GPL-3.0, so the DRM bridge is effectively GPL-3.0 in use
+(see the README license note). The one-press button is powered by a **stream
+sniffer** that records the manifest + license request (and the headers needed to
+replay them) for the tab you're watching — this needs the `webRequest` + all-URL
+permission, keeps nothing on disk, and sends captures only to your local bridge.
+See `docs/KEYFRAME-BRIDGE.md` to narrow or remove it.
+
 ## Troubleshooting
 
+- **Keyframe page says "bridge down"** → run `native\install-keyframe.ps1` with
+  your extension ID, restart the browser.
+- **"still needed: ffmpeg / mp4decrypt / pywidevine / a .wvd"** → the engine's
+  health check lists exactly what to install; see Mode 3.
+- **DRM job fails with "no content keys" / license error** → wrong CDM, or the
+  license URL/headers the provider needs weren't supplied.
 - **Files get random UUID names** → "Ask where to save each file" is on;
   turn it off (see Mode 1).
 - **Player says it can't read course files** → the error shows the exact path

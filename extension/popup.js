@@ -16,7 +16,7 @@ const BOOLS = [
   "download_captions", "download_assets", "download_quizzes", "skip_lectures",
   "keep_vtt", "skip_hls", "hd", "send_cookies", "subscription_course",
   "id_as_course_name", "continue_lecture_numbers", "save_to_file",
-  "load_from_file", "use_h265", "use_nvenc",
+  "load_from_file", "use_h265", "use_nvenc", "skip_existing",
 ];
 const VALUES = ["quality", "concurrent", "chapter", "lang", "h265_crf", "h265_preset", "log_level", "hd_lanes"];
 
@@ -419,6 +419,31 @@ function applyGpuState() {
 }
 
 /** Decide and display which engine is in play. Returns health, or null. */
+// Hide settings that don't apply to the selected mode (confirmed by audit).
+// CONTAINER_ONLY: only the Docker path reads these. BROWSER_ONLY: only the
+// in-browser path uses these (the container never gets them).
+const CONTAINER_ONLY = [
+  "concurrent", "use_h265", "use_nvenc", "h265_crf", "h265_preset",
+  "subscription_course", "save_to_file", "load_from_file", "send_cookies", "log_level",
+];
+const BROWSER_ONLY = ["hd", "hd_lanes", "skip_existing"];
+function hostOf(el) { return el.closest("label") || el.parentElement; }
+function setVisible(ids, visible) {
+  for (const id of ids) {
+    const el = $(id);
+    if (!el) continue;
+    const host = hostOf(el);
+    if (host) host.hidden = !visible;
+  }
+}
+function applyModeVisibility(isContainer) {
+  setVisible(CONTAINER_ONLY, isContainer);
+  setVisible(BROWSER_ONLY, !isContainer);
+  // encoder sub-panel + GPU hint only make sense in Docker mode
+  const h265 = $("h265opts"); if (h265) h265.hidden = !isContainer || !$("use_h265").checked;
+  const nv = $("nvencHint"); if (nv) nv.hidden = !isContainer;
+}
+
 async function refreshEngine() {
   const settings = await getSettings();
   const { useContainer, apiBase } = settings;
@@ -444,11 +469,12 @@ async function refreshEngine() {
     $("engineState").textContent = "browser only";
     $("engineState").className = "pill";
     $("engineHint").textContent =
-      "No setup needed. Max 720p, DRM lectures skipped. Turn Docker on for 1080p and GPU encoding.";
+      "No setup needed — DRM, 1080p and subtitles all work in the browser. Docker only adds GPU re-encoding.";
     $("health").textContent = "local";
     $("health").className = "pill";
     applyGpuState();
     applyDestState();
+    applyModeVisibility(false);
     return null;
   }
 
@@ -466,6 +492,7 @@ async function refreshEngine() {
       `Nothing answering on ${apiBase} — falling back to browser mode.`;
   }
   applyDestState();
+  applyModeVisibility(state.engine === "container");
   return health;
 }
 
@@ -638,7 +665,109 @@ async function collectJobs() {
   return rows;
 }
 
+const collapsedCourses = new Set(); // courses currently collapsed in the stack
+const seenCourses = new Set(); // courses start collapsed (one line per course)
+let lastStackSig = null; // skip identical redraws so the list doesn't blink
+
+/** Discard one item (lecture/file), across all three backends. */
+async function discardItem(it) {
+  try {
+    if (it.mode === "drm") await chrome.runtime.sendMessage({ type: "vv:remove", id: it.jobId });
+    else if (it.mode === "hd") await skipHdEntry(it.jobId, it.index);
+    else if (it.mode === "local") await cancelLocalFile(it.jobId, it.path);
+  } catch { /* already gone */ }
+  chrome.runtime.sendMessage({ type: "refresh-badge" }).catch(() => {});
+  await refreshJobs();
+}
+
+/** Discard every job in a course group, across all three backends. */
+async function discardCourse(rows) {
+  const seen = new Set();
+  for (const it of rows) {
+    const key = `${it.mode}:${it.jobId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      if (it.mode === "drm") await chrome.runtime.sendMessage({ type: "vv:remove", id: it.jobId });
+      else if (it.mode === "hd") { await cancelHdJob(it.jobId).catch(() => {}); await removeHdJob(it.jobId); }
+      else if (it.mode === "local") { await cancelLocalJob(it.jobId).catch(() => {}); await removeLocalJob(it.jobId); }
+    } catch { /* already gone */ }
+  }
+  chrome.runtime.sendMessage({ type: "refresh-badge" }).catch(() => {});
+  await refreshJobs();
+}
+
+/** Unified per-item download stack (DRM + 1080p + files), grouped by course and
+ *  collapsible, mirroring the on-page injector. Fed by the background job-stack. */
+async function renderStack() {
+  const el = $("stack");
+  if (!el) return;
+  let items = [];
+  try { const res = await chrome.runtime.sendMessage({ type: "job-stack" }); items = (res && res.items) || []; }
+  catch { return; }
+  const sig = JSON.stringify(items.map((i) => [i.course, i.title, i.status, i.percent]))
+    + "|" + [...collapsedCourses].sort().join(",");
+  if (sig === lastStackSig) return; // nothing changed -> no redraw -> no blink
+  lastStackSig = sig;
+  el.textContent = "";
+  if (!items.length) return;
+
+  const groups = new Map();
+  for (const it of items) { const k = it.course || "Downloads"; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(it); }
+  for (const [course, rows] of groups) {
+    if (!seenCourses.has(course)) { seenCourses.add(course); collapsedCourses.add(course); } // default collapsed
+    const gDone = rows.filter((i) => i.status === "done").length;
+    const gFail = rows.filter((i) => i.status === "failed").length;
+    const gPct = Math.round(rows.reduce((a, i) => a + (i.status === "done" ? 100 : (i.percent || 0)), 0) / rows.length);
+    const head = document.createElement("div");
+    head.className = "ghead" + (collapsedCourses.has(course) ? " collapsed" : "");
+    const car = document.createElement("span"); car.className = "gcaret"; car.textContent = "▾";
+    const nm = document.createElement("span"); nm.className = "gname"; nm.textContent = course; nm.title = course;
+    const ct = document.createElement("span"); ct.className = "gcount"; ct.textContent = `${gDone}/${rows.length}` + (gFail ? ` · ${gFail}✕` : "");
+    const del = document.createElement("button");
+    del.className = "gdiscard"; del.textContent = "×"; del.title = "Discard this course";
+    del.addEventListener("click", (e) => { e.stopPropagation(); discardCourse(rows); });
+    head.append(car, nm, ct, del);
+    head.addEventListener("click", () => {
+      if (collapsedCourses.has(course)) collapsedCourses.delete(course); else collapsedCourses.add(course);
+      renderStack();
+    });
+    el.appendChild(head);
+    const gbar = document.createElement("div"); gbar.className = "gbar";
+    const gfill = document.createElement("div"); gfill.className = "gbar-fill"; gfill.style.width = `${gPct}%`;
+    gbar.appendChild(gfill); el.appendChild(gbar);
+    if (collapsedCourses.has(course)) continue;
+    for (const it of rows) {
+      const row = document.createElement("div");
+      row.className = `srow ${it.status} nested`;
+      const pct = Math.max(0, Math.min(100, it.percent || 0));
+      const t = document.createElement("span"); t.className = "t"; t.textContent = it.title;
+      t.title = it.error ? `${it.title}\n${it.error}` : it.title;
+      const s = document.createElement("span"); s.className = "s";
+      const k = document.createElement("span"); k.className = "k"; k.textContent = it.kind;
+      const d = document.createElement("button");
+      d.className = "sdiscard"; d.textContent = "×"; d.title = "Discard this file";
+      d.addEventListener("click", (e) => { e.stopPropagation(); discardItem(it); });
+      s.append(k, document.createTextNode(it.status === "running" ? `${pct}%` : it.status), d);
+      const mini = document.createElement("span"); mini.className = "mini";
+      const fill = document.createElement("span"); fill.className = "mini-fill";
+      fill.style.width = `${it.status === "done" ? 100 : pct}%`;
+      mini.appendChild(fill);
+      row.append(t, s, mini);
+      el.appendChild(row);
+    }
+  }
+}
+
 async function refreshJobs() {
+  await renderStack();
+  // the unified stack above is now the single job list (DRM + 1080p + files),
+  // so the legacy per-mode list and its detail pane stay hidden.
+  $("jobs").hidden = true;
+  $("jobDetail").hidden = true;
+  return;
+
+  // eslint-disable-next-line no-unreachable
   const jobs = await collectJobs();
 
   const list = $("jobs");
@@ -873,17 +1002,27 @@ function wire() {
   });
   $("clearJobs").addEventListener("click", async (e) => {
     e.preventDefault();
+    let removed = 0;
+    try { await chrome.runtime.sendMessage({ type: "vv:clear" }); } catch { /* engine idle */ }
     try {
-      const res = await api("/api/jobs/clear", { method: "POST" });
-      state.selected = null;
-      state.cursor = 0;
-      $("jobLog").textContent = "";
-      await refreshJobs();
-      chrome.runtime.sendMessage({ type: "refresh-badge" }).catch(() => {});
-      setBanner(res.removed ? `Removed ${res.removed} finished job(s).` : "Nothing finished to clear.", "info");
-    } catch (err) {
-      setBanner(err.message);
-    }
+      for (const stub of await listHdJobs()) {
+        const j = await hdJobStatus(stub.id);
+        if (j && (j.status === "done" || j.status === "cancelled")) { await removeHdJob(stub.id); removed += 1; }
+      }
+    } catch { /* none */ }
+    try {
+      for (const stub of await listLocalJobs()) {
+        const j = await localJobStatus(stub.id);
+        if (j && j.status === "done") { await removeLocalJob(stub.id); removed += 1; }
+      }
+    } catch { /* none */ }
+    try { const res = await api("/api/jobs/clear", { method: "POST" }); removed += res.removed || 0; } catch { /* container off */ }
+    state.selected = null;
+    state.cursor = 0;
+    $("jobLog").textContent = "";
+    await refreshJobs();
+    chrome.runtime.sendMessage({ type: "refresh-badge" }).catch(() => {});
+    setBanner("Cleared finished downloads.", "info");
   });
   $("tabPick").addEventListener("change", async (e) => {
     $("courseUrl").value = e.target.value;

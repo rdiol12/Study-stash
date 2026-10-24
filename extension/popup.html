@@ -73,8 +73,8 @@
         </select>
       </div>
       <div>
-        <label for="concurrent">Concurrent segments</label>
-        <input id="concurrent" type="number" min="1" max="30" value="10" />
+        <label for="hd_lanes">Parallel downloads <span class="hint-inline">how many at once (DRM + 1080p), 1–12</span></label>
+        <input id="hd_lanes" type="number" min="1" max="12" value="3" />
       </div>
     </section>
 
@@ -98,6 +98,7 @@
         <label><input type="checkbox" id="skip_lectures" /> Skip videos</label>
         <label><input type="checkbox" id="keep_vtt" /> Keep .vtt</label>
         <label><input type="checkbox" id="skip_hls" /> Skip HLS</label>
+        <label title="Skip lectures whose file already exists in your folder (by name). Turn off to re-download updated videos."><input type="checkbox" id="skip_existing" checked /> Skip already downloaded</label>
       </div>
     </section>
 
@@ -108,7 +109,7 @@
         <label><input type="checkbox" id="send_cookies" /> Use cookies instead of token <span class="hint-inline">try this if auth fails</span></label>
         <label><input type="checkbox" id="subscription_course" /> Force subscription course</label>
         <label><input type="checkbox" id="id_as_course_name" /> Use course ID as folder</label>
-        <label><input type="checkbox" id="continue_lecture_numbers" /> Continuous lecture numbers</label>
+        <label><input type="checkbox" id="continue_lecture_numbers" checked /> Continuous lecture numbers</label>
         <label><input type="checkbox" id="save_to_file" /> Cache course data</label>
         <label><input type="checkbox" id="load_from_file" /> Load cached course data</label>
         <label><input type="checkbox" id="use_h265" /> Re-encode to H.265</label>
@@ -126,13 +127,8 @@
         </div>
       </div>
       <div>
-        <label for="hd_lanes">Parallel lectures <span class="hint-inline">1080p mode; each uses ~300 MB RAM</span></label>
-        <select id="hd_lanes">
-          <option value="1">1 (lowest memory)</option>
-          <option value="2" selected>2</option>
-          <option value="3">3</option>
-          <option value="4">4 (fastest, heaviest)</option>
-        </select>
+        <label for="concurrent">Concurrent segments <span class="hint-inline">Docker mode only</span></label>
+        <input id="concurrent" type="number" min="1" max="30" value="10" />
       </div>
       <div>
         <label for="log_level">Log level</label>
@@ -155,10 +151,12 @@
         <label>Jobs</label>
         <span class="row-links">
           <a id="openPlayer" href="#">My courses</a>
+          <a id="openKeyframe" href="keyframe.html" target="_blank">Keyframe (DRM)</a>
           <a id="clearJobs" href="#">Clear finished</a>
           <a id="openOptions" href="#">Settings</a>
         </span>
       </div>
+      <div id="stack" class="stack"></div>
       <ul id="jobs" class="jobs"></ul>
       <div id="jobDetail" hidden>
         <div class="row-between">

@@ -8,6 +8,13 @@
     <!-- mux.js sets a global; loading it as a classic script first lets the
          module below read window.muxjs without bundling. -->
     <script src="vendor/mux.min.js"></script>
+    <!-- Standalone Widevine DRM: CDM keys, CENC decrypt, DASH parse, and mux
+         (mp4box). All set window globals the module below uses. No native host. -->
+    <script src="vendor/mp4box.all.min.js"></script>
+    <script src="wvcdm.js"></script>
+    <script src="cenc.js"></script>
+    <script src="dash.js"></script>
+    <script src="remux.js"></script>
     <script type="module" src="offscreen.js"></script>
   </body>
 </html>

@@ -3,11 +3,12 @@
 // an MV3 service worker can be terminated at any time, but native downloads
 // keep running, so the browser owns the queue and we only observe it.
 
-import { nativeMove } from "./native.js";
+import { nativeMove, nativeExists, nativeWriteFile } from "./native.js";
 // NOTE: circular with common.js (it imports startLocalJob) -- safe because the
 // binding is only invoked at call time, never during module evaluation.
-import { getSettings } from "./common.js";
+import { getSettings, getPrefs } from "./common.js";
 import { registerDownloadName } from "./name-guard.js";
+import { vttToSrt } from "./subs.js";
 
 const JOBS_KEY = "localJobs";
 const MAX_JOBS_KEPT = 20;
@@ -58,7 +59,9 @@ export function flattenPlan(plan, opts = {}) {
         const want = (opts.lang || "en").toLowerCase();
         for (const cap of lecture.captions || []) {
           if (want !== "all" && cap.lang.toLowerCase().split("_")[0] !== want) continue;
-          items.push({ path: `${dir}/${lecture.name}.${cap.lang}.vtt`, url: cap.url });
+          // default: convert the VTT to SRT on the way down; keep_vtt leaves it raw
+          if (opts.keepVtt) items.push({ path: `${dir}/${lecture.name}.${cap.lang}.vtt`, url: cap.url });
+          else items.push({ path: `${dir}/${lecture.name}.${cap.lang}.srt`, url: cap.url, convert: "srt" });
         }
       }
       if (opts.assets) {
@@ -87,13 +90,27 @@ function parseChapterFilter(raw) {
   return want.size ? want : null;
 }
 
-function startDownload(item) {
-  registerDownloadName(item.url, item.path);
+async function startDownload(item) {
+  let url = item.url;
+  let path = item.path;
+  // Subtitles: fetch the VTT and hand Chrome a converted SRT as a data: URL
+  // (small text, so no offscreen/blob needed). Fall back to the raw VTT on error.
+  if (item.convert === "srt") {
+    try {
+      const resp = await fetch(item.url, { credentials: "include" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const srt = vttToSrt(await resp.text());
+      url = "data:application/x-subrip;charset=utf-8," + encodeURIComponent(srt);
+    } catch {
+      path = path.replace(/\.srt$/i, ".vtt");
+    }
+  }
+  registerDownloadName(url, path);
   return new Promise((resolve) => {
     chrome.downloads.download(
       {
-        url: item.url,
-        filename: item.path,
+        url,
+        filename: path,
         // re-runs replace rather than piling up "file (1).mp4"
         conflictAction: "overwrite",
         saveAs: false,
@@ -108,6 +125,38 @@ function startDownload(item) {
 
 export async function startLocalJob(plan, opts = {}) {
   const items = flattenPlan(plan, opts);
+  // Skip files already on disk in the destination (match the final location:
+  // nativeTarget\<course>\<chapter>\<file>, i.e. the path minus the destSub).
+  if (opts.skipExisting && opts.nativeTarget) {
+    const rel = (p) => p.replace(/\\/g, "/").split("/").slice(1).join("/").replace(/\//g, "\\");
+    const dl = items.filter((it) => it.url && !it.skipped);
+    const want = dl.map((it) => opts.nativeTarget.replace(/[\/\\]+$/, "") + "\\" + rel(it.path));
+    const present = await nativeExists(want);
+    dl.forEach((it, i) => { if (present[want[i]]) { delete it.url; it.skipped = "already downloaded"; } });
+  }
+  // Captions: fetch + VTT->SRT convert + write straight to the folder via the
+  // helper, so they never hit chrome.downloads (whose data-URL path pops a
+  // Save As dialog in Brave). Videos/assets stay on the normal path.
+  if (opts.nativeTarget) {
+    const relOf = (p) => opts.nativeTarget.replace(/[\/\\]+$/, "") + "\\" + p.replace(/\\/g, "/").split("/").slice(1).join("/").replace(/\//g, "\\");
+    for (const it of items) {
+      if (it.convert !== "srt" || !it.url || it.skipped) continue;
+      try {
+        const resp = await fetch(it.url, { credentials: "include" });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const u8 = new TextEncoder().encode(vttToSrt(await resp.text()));
+        const dest = relOf(it.path);
+        let sent = false;
+        await nativeWriteFile(dest, async () => {
+          if (sent) return null;
+          sent = true;
+          let s = ""; for (let k = 0; k < u8.length; k++) s += String.fromCharCode(u8[k]);
+          return btoa(s);
+        });
+        it.doneNative = true; it.abs = dest; delete it.url;
+      } catch { /* leave it on the chrome.downloads path as a .vtt fallback */ }
+    }
+  }
   // a job with nothing in it would appear and complete instantly -- noise
   if (!items.length) return null;
   const jobId = `local-${Date.now().toString(36)}`;
@@ -117,7 +166,9 @@ export async function startLocalJob(plan, opts = {}) {
   const entries = items.map((item) =>
     item.skipped
       ? { path: item.path, state: "skipped", reason: item.skipped }
-      : { path: item.path, url: item.url, state: "queued" }
+      : item.doneNative
+        ? { path: item.path, state: "complete", abs: item.abs, nativeWritten: true }
+        : { path: item.path, url: item.url, state: "queued", convert: item.convert }
   );
 
   const job = {
@@ -143,8 +194,12 @@ export async function startLocalJob(plan, opts = {}) {
  * entries this job actually started.
  */
 export async function pumpLocalJob(jobId) {
+  // Honor whichever concurrency knob the user actually changed (options page
+  // `parallel`, or the popup's "Parallel lectures"/"Concurrent" fields).
   const { parallel } = await getSettings();
-  const limit = Math.max(1, Math.min(8, Number(parallel) || 3));
+  const { prefs } = await getPrefs();
+  const want = Math.max(Number(parallel) || 0, Number(prefs.hd_lanes) || 0, 3);
+  const limit = Math.max(1, Math.min(12, want));
 
   const jobs = await readJobs();
   const job = jobs.find((j) => j.id === jobId);
@@ -162,7 +217,7 @@ export async function pumpLocalJob(jobId) {
   for (const entry of job.entries) {
     if (active + started >= limit) break;
     if (entry.state !== "queued") continue;
-    const { id, error } = await startDownload({ url: entry.url, path: entry.path });
+    const { id, error } = await startDownload({ url: entry.url, path: entry.path, convert: entry.convert });
     if (error) {
       entry.state = "error";
       entry.reason = error;
@@ -202,6 +257,12 @@ export async function localJobStatus(jobId) {
     if (entry.state === "error") {
       counts.error += 1;
       files.push({ path: entry.path, state: "error", reason: entry.reason });
+      continue;
+    }
+    if (entry.state === "complete" && !entry.downloadId) {
+      // written straight to disk by the helper (e.g. a converted .srt caption)
+      counts.complete += 1;
+      files.push({ path: entry.path, state: "complete", received: 0, total: 0 });
       continue;
     }
     const [live] = await chrome.downloads.search({ id: entry.downloadId });
@@ -294,6 +355,10 @@ export async function relocateFinishedJob(jobId, target) {
   job.relocated = to;
   job.movedFiles = res.moved;
   await writeJobs(jobs);
+  // files were moved off the download folder — clear their browser history rows
+  for (const e of job.entries) {
+    if (e.downloadId) { try { await chrome.downloads.erase({ id: e.downloadId }); } catch { /* gone */ } }
+  }
   return res;
 }
 

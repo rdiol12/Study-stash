@@ -16,3 +16,7 @@ coloredlogs
 browser_cookie3
 demoji
 curl_cffi==0.15.0
+# Widevine L3 CDM for DRM lectures. 1.8.0 and its pinned protobuf/pymp4/
+# construct deps install cleanly on the image's Python 3.12 (the construct/
+# pymp4 breakage noted upstream is a Python 3.13 problem, not 3.12).
+pywidevine==1.8.0

@@ -8,69 +8,130 @@
 
 **Download your Udemy courses. Watch them offline. Keep your progress.**
 
-A browser extension with a built-in Udemy-style player — plus an optional
-Docker engine when you want the heavy artillery.
+A browser extension that downloads the courses you're enrolled in — including
+**Widevine DRM** lectures — decrypts and muxes them entirely in your browser, and
+saves them straight to a folder you choose. No cloud, no account, no server.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Extension-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)](extension/)
-[![Works on Brave](https://img.shields.io/badge/Brave-supported-FB542B?logo=brave&logoColor=white)](#)
-[![Docker optional](https://img.shields.io/badge/Docker-optional-2496ED?logo=docker&logoColor=white)](MANUAL.md#mode-2--extension--docker-the-full-engine)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#)
-
-[**Setup Manual**](MANUAL.md) · [**Quick Start**](#quick-start)
+[![Works on Brave / Chrome](https://img.shields.io/badge/Brave%20%2F%20Chrome-supported-FB542B?logo=brave&logoColor=white)](#)
 
 </div>
 
 ---
 
+## ⚠️ Disclaimer — read first
+
+- **Bring your own key.** This project ships **no** Widevine CDM. You **must**
+  provide your own `.wvd` device file. None is included, none will be shared, and
+  requests for one will be ignored. Where/how you obtain it is entirely your
+  responsibility.
+- **No support.** This is provided as-is. No help, troubleshooting, or
+  installation support will be given. Issues/requests for keys or support will
+  not be answered.
+- **No warranty, no responsibility.** The authors take **no responsibility** for
+  how you use this, for any accounts, data, or hardware affected, or for any
+  legal consequences. Use entirely at your own risk.
+- **Your content only.** Use this solely to download courses you are legally
+  enrolled in, for your own offline use. You alone are responsible for complying
+  with Udemy's Terms of Service and the laws where you live.
+
+By downloading, installing, or using any part of this project you accept all of
+the above.
+
 ## What it does
 
 | | |
 |---|---|
-| **One-click download** | Grab any course you're enrolled in, right from the course page |
-| **Real quality** | 720p direct, or **1080p** transmuxed in-browser — never re-encoded |
-| **Offline player** | Course library with video thumbnails, sections, per-lecture watched ticks |
-| **Picks up where you stopped** | Resume positions per video, autoplay next, playback speed |
-| **Scrub previews** | Hover the seek bar, see the frame — YouTube style |
-| **Subtitles** | Downloaded captions appear in the player's CC menu |
-| **Interactive quizzes** | Exam & practice modes, timer, attempt history — fully offline |
-| **Your files, your names** | `Course/01 - Section/001. Lecture name.mp4` — anywhere on disk |
-| **Optional Docker engine** | Native ffmpeg 1080p and bulk downloads via the upstream engine |
+| **One button** | Downloads every lecture of a course you're enrolled in — DRM and non-DRM together |
+| **Widevine DRM, in-browser** | A pure-JavaScript L3 CDM resolves keys with **your own** `.wvd` device, decrypts (cenc/cbcs) and muxes — no Python, no external tools |
+| **Real quality** | Progressive, or **1080p** transmuxed in-browser — never re-encoded |
+| **Saves where you want** | With the tiny native helper, files are written straight to any folder (e.g. `A:\udemycourses\<Course>\…`), no browser "Save As" prompts |
+| **Subtitles → SRT** | Captions are converted to `.srt` automatically (keep `.vtt` if you prefer) |
+| **Skip what you have** | Re-run a course and only the missing lectures download |
+| **One unified list** | DRM + 1080p + files grouped per course, collapsible, with per-item/per-course discard — in the popup and as an on-page panel |
+| **Offline player** | Built-in course library with resume, speed, scrub previews, quizzes |
+| **Optional Docker engine** | A separate legacy Python downloader for bulk/native-ffmpeg workflows |
 
-## Quick start
+## Install & activate
+
+**1. Get the files**
 
 ```text
-1. Clone this repo
-2. brave://extensions → Developer mode → Load unpacked → select extension/
-3. Open a Udemy course you're enrolled in → click the "Download course" button
-4. Popup → My courses → press play 
+git clone https://github.com/rdiol12/udemy-downloader-bridge
 ```
 
-Two one-time browser settings make everything smooth — see the
-[**Manual**](MANUAL.md) for those, the optional *move-anywhere* helper, and
-the full Docker setup.
+**2. Load the extension**
 
-### Which mode is for me?
+```text
+brave://extensions  (or chrome://extensions)
+→ enable Developer mode
+→ Load unpacked → select the  extension/  folder
+```
+Copy the extension's **ID** shown on its card — you'll need it for step 3.
 
-|  | Extension only | + Docker |
-|---|---|---|
-| Install | none | Docker Desktop |
-| 1080p | in-browser transmux | native ffmpeg (faster) |
-| DRM lectures | skipped | skipped |
-| Resume interrupted course | re-downloads | skips existing files |
+**3. (Recommended) Install the native helper** — lets the extension save files
+directly to any folder on disk (and skips the browser's "Save As" prompts).
+Needs **Python 3** on PATH. In the repo folder, PowerShell:
 
-**Start with the extension alone** — add Docker when you want native-speed
-1080p or bulk downloads.
+```powershell
+powershell -ExecutionPolicy Bypass -File native\install.ps1 -ExtensionId <your-extension-id>
+```
+Then restart the browser. (Without this, files land in your Downloads folder.)
+
+**4. (For DRM courses) add your CDM** — drop your own Widevine **L3** `.wvd`
+device file at:
+
+```text
+extension/cdm/device.wvd
+```
+It loads automatically. You can also load one at runtime from the Keyframe page
+("Load .wvd…"). The project ships **no** CDM — bring your own.
+
+**5. Download**
+
+```text
+Open a Udemy course you're enrolled in → click the extension → set your
+"Save to" folder → Download course.
+```
+
+Watch offline from the popup → **My courses**.
+
+## Settings that matter
+
+- **Parallel downloads** — how many lectures download at once (1–12).
+- **Captions** — downloads subtitles as `.srt` (tick **Keep .vtt** to keep raw VTT).
+- **Skip already downloaded** — on by default; re-runs fetch only what's missing
+  (filename-based, so uncheck it to force-refresh a lecture the site updated).
+- **Save to** — the absolute folder files are written to.
+
+Docker-only options (H.265/NVENC re-encode, etc.) are hidden unless you turn
+Docker on.
 
 ## Credits
 
-The downloader core — course parsing, DASH/HLS handling and muxing — and the quiz player template are the work of
+The downloader core — course parsing, DASH/HLS handling, muxing — and the quiz
+player template are the work of
 **[Puyodead1/udemy-downloader](https://github.com/Puyodead1/udemy-downloader)**
-and its contributors. This project would not exist without it; its full
-commit history is preserved in this repo. In-browser TS→MP4 remuxing is
-powered by [mux.js](https://github.com/videojs/mux.js) (Video.js project).
+and its contributors; its commit history is preserved here. In-browser TS→MP4
+remuxing uses [mux.js](https://github.com/videojs/mux.js).
+
+The in-browser DRM engine (`extension/wvcdm.js`, `cenc.js`, `dash.js`,
+`remux.js`) is this project's own code — a hand-rolled Widevine L3 CDM on
+WebCrypto plus CENC/CBCS decryption and mp4 muxing, all in JavaScript. It uses
+**no** GPL libraries, so the extension stays MIT. You supply your own `.wvd`.
+
+The **optional Docker engine** (`main.py`, `udemy_drm.py`) uses
+[`pywidevine`](https://github.com/devine-dl/pywidevine) (**GPL-3.0**),
+[Bento4 `mp4decrypt`](https://www.bento4.com/) and [ffmpeg](https://ffmpeg.org/);
+that path is therefore GPL-3.0. It is entirely separate from the extension.
 
 ## License
 
-[MIT](LICENSE) — same as upstream.
-Downloader core © [Puyodead1 and contributors](https://github.com/Puyodead1/udemy-downloader).
+- **Extension (incl. in-browser DRM):** [MIT](LICENSE).
+- **Optional Docker engine (`main.py`/`udemy_drm.py`):** GPL-3.0 in use (imports `pywidevine`).
+- Downloader core © [Puyodead1 and contributors](https://github.com/Puyodead1/udemy-downloader).
+
+> Use this only to download courses you are legally enrolled in, for your own
+> offline use. You are responsible for complying with Udemy's terms and the law
+> where you live.

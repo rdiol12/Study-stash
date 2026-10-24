@@ -28,6 +28,7 @@ from tqdm import tqdm
 from constants import *
 from tls import SSLCiphers
 from vtt_to_srt import convert
+import udemy_drm
 
 DOWNLOAD_DIR = os.path.join(os.getcwd(), "out_dir")
 MAIN_SCRIPT_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +63,9 @@ browser = None
 cj = None
 use_continuous_lecture_numbers = False
 chapter_filter = None
+wvd_path = None
+_drm_cdm = None
+_drm_cdm_loaded = False
 
 
 def deEmojify(inputStr: str):
@@ -100,7 +104,7 @@ def parse_chapter_filter(chapter_str: str):
 
 # this is the first function that is called, we parse the arguments, setup the logger, and ensure that required directories exist
 def pre_run():
-    global dl_assets, dl_captions, dl_quizzes, skip_lectures, caption_locale, quality, bearer_token, course_name, keep_vtt, skip_hls, concurrent_downloads, load_from_file, save_to_file, bearer_token, course_url, info, logger, keys, id_as_course_name, LOG_LEVEL, use_h265, h265_crf, h265_preset, use_nvenc, browser, is_subscription_course, DOWNLOAD_DIR, use_continuous_lecture_numbers, chapter_filter
+    global dl_assets, dl_captions, dl_quizzes, skip_lectures, caption_locale, quality, bearer_token, course_name, keep_vtt, skip_hls, concurrent_downloads, load_from_file, save_to_file, bearer_token, course_url, info, logger, keys, id_as_course_name, LOG_LEVEL, use_h265, h265_crf, h265_preset, use_nvenc, browser, is_subscription_course, DOWNLOAD_DIR, use_continuous_lecture_numbers, chapter_filter, wvd_path
 
     # make sure the logs directory exists
     if not os.path.exists(LOG_DIR_PATH):
@@ -278,6 +282,12 @@ def pre_run():
         type=str,
         help="Download specific chapters. Use comma separated values and ranges (e.g., '1,3-5,7,9-11').",
     )
+    parser.add_argument(
+        "--wvd",
+        dest="wvd",
+        type=str,
+        help="Path to a Widevine L3 .wvd device file. Required to download DRM-protected lectures. Can also be set via the UDEMY_WVD environment variable. If omitted, DRM lectures are skipped.",
+    )
     # parser.add_argument("-v", "--version", action="version", version="You are running version {version}".format(version=__version__))
 
     args = parser.parse_args()
@@ -348,6 +358,9 @@ def pre_run():
         DOWNLOAD_DIR = os.path.abspath(args.out)
     if args.use_continuous_lecture_numbers:
         use_continuous_lecture_numbers = args.use_continuous_lecture_numbers
+    # DRM device: CLI --wvd wins, else the UDEMY_WVD env var (how the container
+    # supplies it). Never hardcoded; absent means DRM lectures are skipped.
+    wvd_path = args.wvd or os.getenv("UDEMY_WVD")
 
     # setup a logger
     logger = logging.getLogger(__name__)
@@ -1152,6 +1165,7 @@ class Udemy:
                         "sources_count": sources_count,
                         "is_encrypted": True,
                         "asset_id": asset.get("id"),
+                        "media_license_token": asset.get("media_license_token"),
                         "type": asset.get("asset_type"),
                     }
 
@@ -1413,16 +1427,72 @@ def process_caption(caption, lecture_title, lecture_dir, tries=0):
                 logger.exception(f"    > Error converting caption")
 
 
-def process_lecture(lecture, lecture_path, chapter_dir):
+def _get_drm_cdm():
+    """Lazily build the Widevine CDM from the configured .wvd (once per run)."""
+    global _drm_cdm, _drm_cdm_loaded
+    if not _drm_cdm_loaded:
+        _drm_cdm_loaded = True
+        _drm_cdm = udemy_drm.load_cdm(wvd_path)
+    return _drm_cdm
+
+
+def process_lecture(lecture, lecture_path, chapter_dir, udemy=None):
     lecture_id = lecture.get("id")
     lecture_title = lecture.get("lecture_title")
     is_encrypted = lecture.get("is_encrypted")
     lecture_sources = lecture.get("video_sources")
 
     if is_encrypted:
-        # DRM support removed from this build: protected lectures are skipped
+        cdm = _get_drm_cdm()
+        if cdm is None:
+            # No .wvd device configured (or pywidevine unavailable): skip, as
+            # before, rather than crash.
+            logger.info(
+                f"      > Lecture '{lecture_title}' is DRM-protected — skipping "
+                "(no .wvd device; set --wvd or UDEMY_WVD to enable DRM)"
+            )
+            return
+
+        if os.path.isfile(lecture_path):
+            logger.info(
+                f"      > Lecture '{lecture_title}' is already downloaded, skipping..."
+            )
+            return
+
+        # Pick the DASH (.mpd) source produced by _extract_media_sources.
+        dash_url = None
+        for source in sorted(
+            lecture_sources or [],
+            key=lambda x: int(x.get("height") or 0),
+            reverse=True,
+        ):
+            if source.get("type") == "dash" and source.get("download_url"):
+                dash_url = source.get("download_url")
+                break
+        if not dash_url:
+            logger.error(
+                f"      > Lecture '{lecture_title}' is DRM-protected but exposes no DASH manifest — skipping"
+            )
+            return
+
+        session = getattr(udemy, "session", None)
+        if session is None:
+            logger.error("      > DRM: no authenticated session available — skipping")
+            return
+
         logger.info(
-            f"      > Lecture '{lecture_title}' is DRM-protected — skipping (no DRM support in this build)"
+            f"      > Lecture '{lecture_title}' is DRM-protected, attempting download..."
+        )
+        udemy_drm.download_drm_lecture(
+            session=session,
+            portal=portal_name,
+            cdm=cdm,
+            asset_id=lecture.get("asset_id"),
+            dash_url=dash_url,
+            out_path=lecture_path,
+            quality=quality if quality is not None else "best",
+            concurrent_downloads=concurrent_downloads,
+            fallback_token=lecture.get("media_license_token"),
         )
     else:
         sources = lecture.get("sources")
@@ -1892,7 +1962,7 @@ def parse_new(udemy: Udemy, udemy_object: dict):
                             except Exception:
                                 logger.exception("    > Failed to write html file")
                     else:
-                        process_lecture(parsed_lecture, lecture_path, chapter_dir)
+                        process_lecture(parsed_lecture, lecture_path, chapter_dir, udemy)
 
             # download subtitles for this lecture
             subtitles = parsed_lecture.get("subtitles")

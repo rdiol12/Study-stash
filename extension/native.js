@@ -66,3 +66,44 @@ export const nativeMkdir = (path) => call({ op: "mkdir", path }, 20000);
 /** Merge-move a finished course tree to its final home. Generous timeout:
  *  moving across drives copies the bytes. */
 export const nativeMove = (from, to) => call({ op: "move", from, to }, 30 * 60 * 1000);
+
+/** Which of these absolute paths already exist as non-empty files.
+ *  Returns a { path: size|false } map; {} if the helper is unavailable. */
+export async function nativeExists(paths) {
+  try { const r = await call({ op: "exists", paths }, 20000); return (r && r.present) || {}; }
+  catch { return {}; }
+}
+
+/**
+ * Stream a file to disk through a persistent native-messaging port, writing it
+ * straight to `path` — no chrome.downloads, so Brave never shows a Save As
+ * dialog. `getNextChunk()` returns the next base64 chunk, or null when done.
+ */
+export function nativeWriteFile(path, getNextChunk, id = `w${Date.now()}-${Math.floor(Math.random() * 1e6)}`) {
+  return new Promise((resolve, reject) => {
+    let port;
+    try { port = chrome.runtime.connectNative(HOST); } catch (err) { reject(err); return; }
+    let done = false;
+    let pending = null;
+    const finish = (fn, arg) => { if (done) return; done = true; try { port.disconnect(); } catch { /* already gone */ } fn(arg); };
+    port.onDisconnect.addListener(() => {
+      const err = chrome.runtime.lastError;
+      finish(reject, new Error((err && err.message) || "the helper disconnected — is it installed?"));
+    });
+    port.onMessage.addListener((msg) => { const p = pending; pending = null; if (p) p(msg); });
+    const send = (m) => new Promise((res, rej) => { pending = res; try { port.postMessage(m); } catch (err) { rej(err); } });
+    (async () => {
+      let r = await send({ op: "write-begin", id, path });
+      if (!r || !r.ok) throw new Error((r && r.error) || "write-begin failed");
+      for (;;) {
+        const b64 = await getNextChunk();
+        if (!b64) break;
+        r = await send({ op: "write-chunk", id, b64 });
+        if (!r || !r.ok) throw new Error((r && r.error) || "write-chunk failed");
+      }
+      r = await send({ op: "write-end", id });
+      if (!r || !r.ok) throw new Error((r && r.error) || "write-end failed");
+      finish(resolve, r);
+    })().catch((err) => finish(reject, err instanceof Error ? err : new Error(String(err))));
+  });
+}

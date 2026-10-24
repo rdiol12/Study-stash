@@ -185,9 +185,8 @@ button.toggle[aria-pressed="true"] {
   border-radius: 6px;
   background: var(--logbg);
   font: 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 button.small { flex: 0 0 auto; padding: 6px 10px; font-size: 11px; }
 
@@ -223,7 +222,7 @@ button.small { flex: 0 0 auto; padding: 6px 10px; font-size: 11px; }
 }
 .jobs li:hover { background: var(--logbg); }
 .jobs li.selected { border-color: var(--accent); }
-.jobs .slug { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs .slug { flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .jobs .state {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -252,7 +251,7 @@ button.small { flex: 0 0 auto; padding: 6px 10px; font-size: 11px; }
 .file-row:last-child { border-bottom: 0; }
 .file-name {
   font: 400 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow-wrap: anywhere; word-break: break-word; min-width: 0;
 }
 .file-meta {
   font: 400 10px/1.4 ui-monospace, Consolas, monospace;
@@ -287,3 +286,37 @@ pre#jobLog {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Unified download stack (DRM + 1080p + files), grouped by course */
+.stack { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-height: 42vh; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
+.stack::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.stack:empty { display: none; }
+.ghead {
+  display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+  padding: 4px 0 3px; border-top: 1px solid var(--line);
+}
+.ghead:first-child { border-top: 0; }
+.gname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gcount { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 11px; }
+.gcaret { color: var(--muted); transition: transform .15s ease; }
+.ghead.collapsed .gcaret { transform: rotate(-90deg); }
+.srow { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 11px; }
+.srow.nested { padding-left: 12px; }
+.srow .t { grid-column: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srow .s { grid-column: 2; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.srow .s .k {
+  display: inline-block; margin-right: 5px; padding: 1px 5px; border-radius: 3px;
+  background: var(--logbg); color: var(--accent); font-size: 9px;
+}
+.srow .mini { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.srow .mini-fill { height: 100%; width: 0%; background: var(--accent); transition: width .35s ease; }
+.srow.done .mini-fill { background: var(--ok); }
+.srow.failed .mini-fill, .srow.skipped .mini-fill { background: var(--danger); }
+.gbar { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin: 1px 0 3px; }
+.gbar-fill { height: 100%; width: 0%; background: var(--accent); transition: width .35s ease; }
+.gdiscard, .sdiscard {
+  border: 0; background: none; cursor: pointer; color: var(--muted);
+  font-size: 14px; line-height: 1; padding: 0 2px; margin-left: 4px;
+}
+.gdiscard:hover, .sdiscard:hover { color: var(--danger); }
+.sdiscard { font-size: 12px; }

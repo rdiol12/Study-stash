@@ -429,7 +429,9 @@ async function loadSubtitles(course, item) {
   video.querySelectorAll("track").forEach((t) => t.remove());
 
   const langs = item.captions && item.captions.length ? item.captions : ["en"];
-  const base = item.rel.replace(/\.mp4$/, "");
+  // strip whatever container extension the file uses (.mp4 browser-mode,
+  // .mkv from the Keyframe engine) so sidecar probing works for both
+  const base = item.rel.replace(/\.[^./\\]+$/, "");
   let first = true;
 
   for (const lang of langs) {

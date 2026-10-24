@@ -1,0 +1,29 @@
+# Keyframe bridge config. Copy to ~/.keyframe-bridge/config.toml and edit, or
+# point KEYFRAME_BRIDGE_CONFIG at this file. Every value also has an env-var
+# override for containerised runs (see README).
+
+[engine]
+# Where the Keyframe engine is cloned. First run clones it here if missing.
+dir = "~/.keyframe-bridge/engine"
+source = "https://github.com/AstraeLabs/Keyframe.git"
+python = "python3"
+auto_update_binaries = true
+
+[download]
+# The ONLY directory the engine is allowed to write into.
+media_root = "~/Videos/Keyframe"
+max_concurrent = 2
+max_attempts = 3
+progress_interval = 2
+use_curl_cffi = false
+
+[drm]
+# CDM selection: "search" uses the first .wvd/.prd found in <engine>/cdm.
+# Set to an explicit device filename to pin one.
+cdm = "search"
+
+[bridge]
+# Only used in --http mode (Docker/daemon). Native-messaging mode ignores it.
+http_port = 8765
+# Leave empty to auto-generate a token at ~/.keyframe-bridge/token.
+token = ""

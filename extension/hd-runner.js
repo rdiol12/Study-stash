@@ -5,8 +5,9 @@
 // no chrome.notifications. So the worker does only fetch + transmux + blob URL,
 // and everything stateful lives here.
 
-import { nativeMove } from "./native.js";
-import { getSettings, setCourseRoot } from "./common.js";
+import { nativeMove, nativeWriteFile, nativeExists } from "./native.js";
+import { getSettings, getPrefs, setCourseRoot } from "./common.js";
+import { setConcurrency, acquireSlot, releaseSlot } from "./gate.js";
 import { registerDownloadName } from "./name-guard.js";
 
 const HD_KEY = "hdJobs";
@@ -228,7 +229,11 @@ function withClaimLock(fn) {
  */
 export async function runHdJob(jobId) {
   const job0 = await patchJob(jobId, { startedAt: Date.now(), segDoneTotal: 0 });
-  const lanes = Math.max(1, Math.min(4, (job0 && job0.concurrency) || 1));
+  const lanes = Math.max(1, Math.min(12, (job0 && job0.concurrency) || 1));
+  const settings = await getSettings();
+  const nativeTarget = settings.nativeTarget; // set -> stream to disk, no chrome.downloads
+  const { prefs } = await getPrefs();
+  setConcurrency(Math.min(12, Math.max(Number(settings.parallel) || 0, Number(prefs.hd_lanes) || 0, 1)));
   let ok = 0;
   let bad = 0;
 
@@ -249,6 +254,8 @@ export async function runHdJob(jobId) {
       const got = await claim();
       if (!got) return;
       const { i, entry } = got;
+      await acquireSlot(); // shared global cap with the DRM pool
+      try {
 
       let res;
       try {
@@ -275,26 +282,39 @@ export async function runHdJob(jobId) {
       }
 
       try {
-        const downloadId = await downloadBlobUrl(res.blobUrl, entry.path);
+        let abs = null, downloadId = null;
+        if (res.bytesId && nativeTarget) {
+          // Stream straight to the user's folder via the helper — no
+          // chrome.downloads (no Save As) and no later move step.
+          const relNoSub = entry.path.split("/").slice(1).join("/").replace(/\//g, "\\");
+          abs = nativeTarget.replace(/[\/\\]+$/, "") + "\\" + relNoSub;
+          let offset = 0;
+          await nativeWriteFile(abs, async () => {
+            const c = await chrome.runtime.sendMessage({ target: "offscreen", type: "bytes-chunk", bytesId: res.bytesId, offset });
+            if (!c || !c.ok) throw new Error((c && c.error) || "failed to read bytes");
+            offset = c.next;
+            return c.b64 || null;
+          });
+        } else {
+          // Fallback (no destination folder set): blob via chrome.downloads.
+          downloadId = await downloadBlobUrl(res.blobUrl, entry.path);
+          try { const [live] = await chrome.downloads.search({ id: downloadId }); abs = live ? live.filename : null; } catch { /* cosmetic */ }
+        }
         ok += 1;
-        // the absolute filename lets the player and the relocator find it
-        let abs = null;
-        try {
-          const [live] = await chrome.downloads.search({ id: downloadId });
-          abs = live ? live.filename : null;
-        } catch { /* cosmetic */ }
         await patchEntry(jobId, i, {
-          state: "complete", bytes: res.size, height: res.height, downloadId, abs,
+          state: "complete", bytes: res.size, height: res.height, downloadId, abs, nativeWritten: !!(res.bytesId && nativeTarget),
         });
       } catch (err) {
         bad += 1;
         await patchEntry(jobId, i, { state: "error", reason: err.message });
       } finally {
         try {
-          await chrome.runtime.sendMessage({
-            target: "offscreen", type: "hls-revoke", blobUrl: res.blobUrl,
-          });
+          await chrome.runtime.sendMessage({ target: "offscreen", type: "bytes-free", bytesId: res.bytesId });
+          await chrome.runtime.sendMessage({ target: "offscreen", type: "hls-revoke", blobUrl: res.blobUrl });
         } catch { /* worker gone; blob dies with it */ }
+      }
+      } finally {
+        releaseSlot();
       }
     }
   }
@@ -324,7 +344,10 @@ export async function finishHdJob(jobId) {
   const complete = job.entries.filter((e) => e.state === "complete");
   if (!complete.length) return;
   const { nativeTarget } = await getSettings();
-  if (nativeTarget) {
+  // native-written entries are already in the user's folder — no move needed; a
+  // move would look for a Downloads source that doesn't exist (WinError 2).
+  const needsMove = complete.some((e) => e.downloadId && !e.nativeWritten);
+  if (nativeTarget && needsMove) {
     try {
       const res = await relocateFinishedHdJob(jobId, nativeTarget);
       if (res) {
@@ -334,6 +357,9 @@ export async function finishHdJob(jobId) {
     } catch (err) {
       console.warn("hd finalize relocate failed:", err.message);
     }
+  } else if (nativeTarget) {
+    // all streamed straight to disk; point the player library at the folder
+    await setCourseRoot(job.courseTitle, nativeTarget.replace(/[\/\\]+$/, "") + "\\" + job.courseTitle).catch(() => {});
   } else {
     // no helper: record the download-folder location for the player
     const done = complete.find((e) => e.abs);
@@ -349,8 +375,17 @@ export async function finishHdJob(jobId) {
 }
 
 export async function startHdJob(plan, opts = {}) {
-  const entries = hdCandidates(plan, opts);
+  let entries = hdCandidates(plan, opts);
   if (!entries.length) throw new Error("No HLS-capable lectures found for HD mode.");
+  // Skip lectures already on disk in the destination (final location =
+  // nativeTarget\<course>\<chapter>\<file>, i.e. the entry path minus destSub).
+  if (opts.skipExisting && opts.nativeTarget) {
+    const rel = (p) => p.replace(/\\/g, "/").split("/").slice(1).join("/").replace(/\//g, "\\");
+    const want = entries.map((e) => opts.nativeTarget.replace(/[\/\\]+$/, "") + "\\" + rel(e.path));
+    const present = await nativeExists(want);
+    entries = entries.filter((e, i) => !present[want[i]]);
+  }
+  if (!entries.length) return null; // everything already downloaded
 
   const job = {
     id: `hd-${Date.now().toString(36)}`,
@@ -360,7 +395,7 @@ export async function startHdJob(plan, opts = {}) {
     status: "running",
     index: 0,
     current: null,
-    concurrency: Math.max(1, Math.min(4, Number(opts.concurrency) || 1)),
+    concurrency: Math.max(1, Math.min(12, Number(opts.concurrency) || 1)),
     entries,
   };
 
@@ -440,6 +475,10 @@ export async function relocateFinishedHdJob(jobId, target) {
   job.relocated = to;
   job.movedFiles = res.moved;
   await writeJobs(jobs);
+  // moved off the download folder — clear their browser download-history rows
+  for (const e of job.entries) {
+    if (e.downloadId) { try { await chrome.downloads.erase({ id: e.downloadId }); } catch { /* gone */ } }
+  }
   return res;
 }
 

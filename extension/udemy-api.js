@@ -43,6 +43,16 @@ async function getJson(url) {
   return res.json();
 }
 
+/** Mint a fresh per-asset Widevine license token. The bulk curriculum token is
+ *  short-lived (its JWT exp is ~5 min), so a big course outruns it; fetching the
+ *  single asset right before each download returns a token valid right now. */
+export async function freshLicenseToken(portal, assetId) {
+  if (!assetId) return null;
+  const url = `${api(portal)}/assets/${assetId}/?fields[asset]=media_license_token`;
+  try { const data = await getJson(url); return (data && data.media_license_token) || null; }
+  catch { return null; }
+}
+
 /** Windows-safe filename, matching what main.py's sanitize_filename produces. */
 export function sanitize(name) {
   // Char codes instead of a regex class: the escaping for backslash and pipe
@@ -106,7 +116,7 @@ const CURRICULUM_FIELDS = [
   "fields[practice]=title,object_index",
   "fields[chapter]=title,object_index",
   "fields[asset]=title,filename,asset_type,status,media_sources,captions," +
-    "download_urls,external_url,course_is_drmed,stream_urls",
+    "download_urls,external_url,course_is_drmed,stream_urls,media_license_token",
   "caching_intent=true",
   "page_size=100",
 ].join("&");
@@ -178,15 +188,29 @@ function videoSources(asset) {
   return out;
 }
 
-function pickProgressive(asset) {
+function pickProgressive(asset, quality = "best") {
   const out = videoSources(asset).filter((s) => !s.hls && !s.dash);
   out.sort((a, b) => b.height - a.height);
-  return out[0] || null;
+  const cap = Number(quality);
+  if (cap) {
+    const atOrBelow = out.find((s) => (s.height || 0) <= cap);
+    if (atOrBelow) return atOrBelow; // best that fits the cap
+    return out[out.length - 1] || null; // nothing that small; take the lowest
+  }
+  return out[0] || null; // "best"
 }
 
 function pickHls(asset) {
   const out = videoSources(asset).filter((s) => s.hls);
   out.sort((a, b) => b.height - a.height);
+  return out.length ? out[0].url : null;
+}
+
+/** The DASH (.mpd) manifest for an encrypted lecture — what the Keyframe bridge
+ *  decrypts. Udemy exposes it in media_sources even when there is no
+ *  progressive/stream_urls source (i.e. the lecture is DRM'd). */
+function pickDash(asset) {
+  const out = videoSources(asset).filter((s) => s.dash);
   return out.length ? out[0].url : null;
 }
 
@@ -313,7 +337,10 @@ function assetsOf(item) {
  * Flatten the curriculum into the same folder shape main.py produces:
  *   <Course>/<02d - Chapter>/<03d Lecture>.mp4
  */
-export function buildPlan(items, courseTitle) {
+export function buildPlan(items, courseTitle, opts = {}) {
+  // opts: { idAsName, courseId, continueNumbers (default true), quality }
+  const continueNumbers = opts.continueNumbers !== false;
+  const quality = opts.quality || "best";
   const chapters = [];
   let chapter = null;
   let counter = 0;
@@ -325,6 +352,7 @@ export function buildPlan(items, courseTitle) {
         lectures: [],
       };
       chapters.push(chapter);
+      if (!continueNumbers) counter = 0; // restart numbering within each chapter
       continue;
     }
     if (item._class !== "lecture" && item._class !== "quiz") continue;
@@ -357,7 +385,7 @@ export function buildPlan(items, courseTitle) {
       continue;
     }
 
-    const best = pickProgressive(asset);
+    const best = pickProgressive(asset, quality);
     // main.py:1105 treats the presence of stream_urls as "not encrypted".
     // Deriving DRM from "no progressive source" was wrong: it flagged all 89
     // lectures the moment the source lookup itself was broken.
@@ -370,6 +398,12 @@ export function buildPlan(items, courseTitle) {
       height: best ? best.height : null,
       // kept so local mode can probe (and later fetch) the higher HLS ladder
       hlsUrl: pickHls(asset),
+      // DASH manifest for DRM lectures, decrypted in-browser by the standalone CDM.
+      dashUrl: pickDash(asset),
+      // Widevine license token — the license request goes to Udemy's own endpoint.
+      // The bulk curriculum token is often stale; assetId lets us mint a fresh one.
+      licenseToken: asset.media_license_token || null,
+      assetId: asset.id || null,
       captions: captionsOf(asset),
       assets: assetsOf(item),
     });

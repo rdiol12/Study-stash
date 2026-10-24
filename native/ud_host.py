@@ -16,13 +16,18 @@ Operations:
   {"op": "move",  "from": "...", "to": "..."}     -> merge-move a tree
 """
 
+import base64
 import json
 import os
 import shutil
 import struct
 import sys
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+
+# Open writers for streamed file writes, keyed by id. A connectNative port keeps
+# one host process alive for the whole stream, so the handle persists here.
+_WRITERS = {}
 
 # Refuse to touch locations where a buggy caller could do real damage.
 BLOCKED = [
@@ -33,12 +38,26 @@ BLOCKED = [
 ]
 
 
+def _read_exactly(n):
+    """Read exactly n bytes; a pipe read() can return fewer, which corrupted
+    large (multi-MB) write-chunk messages and killed the host."""
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = sys.stdin.buffer.read(n - len(buf))
+        if not chunk:
+            return None  # EOF / pipe closed
+        buf += chunk
+    return bytes(buf)
+
+
 def read_message():
-    raw_len = sys.stdin.buffer.read(4)
-    if len(raw_len) < 4:
+    raw_len = _read_exactly(4)
+    if raw_len is None:
         return None
     size = struct.unpack("<I", raw_len)[0]
-    data = sys.stdin.buffer.read(size)
+    data = _read_exactly(size)
+    if data is None:
+        return None
     return json.loads(data.decode("utf-8"))
 
 
@@ -133,13 +152,68 @@ def op_move(msg):
     return {"moved": moved, "from": src, "to": dst}
 
 
+def op_exists(msg):
+    """Report which of the given paths already exist as non-empty files, so the
+    caller can skip re-downloading lectures that are already on disk."""
+    paths = msg.get("paths")
+    if paths is None:
+        paths = [msg.get("path")] if msg.get("path") else []
+    present = {}
+    for p in paths:
+        try:
+            full = normalise(p)
+            present[p] = os.path.getsize(full) if os.path.isfile(full) else False
+        except Exception:
+            present[p] = False
+    return {"present": present}
+
+
 HANDLERS = {
     "ping": lambda msg: {"version": VERSION, "python": sys.version.split()[0]},
     "list": op_list,
     "drives": lambda msg: op_drives(),
     "mkdir": op_mkdir,
     "move": op_move,
+    "exists": op_exists,
+    "write-begin": lambda msg: op_write_begin(msg),
+    "write-chunk": lambda msg: op_write_chunk(msg),
+    "write-end": lambda msg: op_write_end(msg),
 }
+
+
+def op_write_begin(msg):
+    """Open a file for a streamed write straight to its final location, so the
+    video never goes through the browser's download folder (no Save As dialog)."""
+    wid = msg.get("id")
+    full = normalise(msg.get("path"))
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    if wid in _WRITERS:
+        try:
+            _WRITERS[wid]["f"].close()
+        except Exception:
+            pass
+    _WRITERS[wid] = {"f": open(full, "wb"), "path": full, "bytes": 0}
+    return {"path": full}
+
+
+def op_write_chunk(msg):
+    wid = msg.get("id")
+    w = _WRITERS.get(wid)
+    if not w:
+        raise ValueError("no open writer for this id")
+    data = base64.b64decode(msg.get("b64") or "")
+    w["f"].write(data)
+    w["bytes"] += len(data)
+    return {"bytes": w["bytes"]}
+
+
+def op_write_end(msg):
+    wid = msg.get("id")
+    w = _WRITERS.pop(wid, None)
+    if not w:
+        raise ValueError("no open writer for this id")
+    w["f"].close()
+    return {"path": w["path"], "bytes": w["bytes"]}
 
 
 def main():

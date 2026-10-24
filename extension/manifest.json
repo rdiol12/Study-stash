@@ -12,11 +12,11 @@
     "downloads",
     "offscreen",
     "notifications",
-    "nativeMessaging"
+    "nativeMessaging",
+    "webRequest"
   ],
   "host_permissions": [
-    "*://*.udemy.com/*",
-    "*://*.udemycdn.com/*",
+    "*://*/*",
     "http://127.0.0.1/*",
     "http://localhost/*",
     "file:///*"
