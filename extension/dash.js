@@ -1,4 +1,4 @@
-// DASH MPD parsing in JS — faithful port of native_engine.parse_mpd.
+// DASH MPD parsing in JS (SegmentTemplate / SegmentList / SegmentBase + PSSH).
 // Returns per-track init+segment URLs, the Widevine PSSH init_data, and (if
 // present) the license URL. Uses DOMParser (available in the offscreen document).
 (function (root) {

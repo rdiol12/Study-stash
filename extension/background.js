@@ -321,9 +321,8 @@ async function vvProviderHeaders(host) {
   return headers;
 }
 
-// Host -> Keyframe service. EDIT THIS to match the providers your Keyframe
-// build supports (service ids come from Keyframe, domains change over time).
-// The injected button only appears on hosts listed here (see content-vv.js /
+// Host -> DRM service hint for non-Udemy providers (domains change over time).
+// The injected button only appears on hosts listed here (see content.js /
 // manifest content_scripts), so autonomy stays scoped to known providers and
 // no network traffic is ever inspected.
 const PROVIDERS = [
