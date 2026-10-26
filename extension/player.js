@@ -927,6 +927,19 @@ $("back").addEventListener("click", () => {
   applyAside();
   renderLibrary();
 });
+// Play/pause from a click or Space, with the centered icon other players flash:
+// it shows what just happened (▶ resumed, ❚❚ paused), then grows and fades.
+const PLAY_SVG = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const PAUSE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
+function togglePlay() {
+  if (video.paused) video.play().catch(() => {}); else video.pause();
+  const flash = $("playFlash");
+  flash.innerHTML = video.paused ? PAUSE_SVG : PLAY_SVG;
+  flash.classList.remove("show");
+  void flash.offsetWidth; // restart the animation on quick repeat toggles
+  flash.classList.add("show");
+}
+
 // Click the picture to play/pause, double-click for fullscreen (the native
 // fullscreen button is hidden via controlsList, so this uses ours). The single
 // click waits out the double-click window so a double-click doesn't also
@@ -940,7 +953,7 @@ video.addEventListener("click", (e) => {
   if (e.detail > 1) return; // second click of a double-click
   clickTimer = setTimeout(() => {
     if (!video.currentSrc) return;
-    if (video.paused) video.play().catch(() => {}); else video.pause();
+    togglePlay();
   }, DBLCLICK_MS);
 });
 video.addEventListener("dblclick", (e) => {
@@ -959,7 +972,7 @@ document.addEventListener("keydown", (e) => {
   if (!state.playing) return;
   if (e.code === "Space" || e.key === " ") {
     e.preventDefault();
-    if (video.paused) video.play().catch(() => {}); else video.pause();
+    togglePlay();
   } else if (e.code === "ArrowLeft") {
     e.preventDefault();
     video.currentTime = Math.max(0, video.currentTime - 5);

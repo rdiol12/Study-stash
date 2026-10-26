@@ -57,6 +57,19 @@
       #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #000; }
       /* always "contain": "cover" cut the edges off screen recordings (code, slides) */
       video { width: 100%; flex: 1; min-height: 0; outline: none; background: #000; object-fit: contain; }
+      /* centered play/pause icon flashed on toggle, like YouTube's */
+      #playFlash {
+        position: absolute; left: 50%; top: 45%; z-index: 6; pointer-events: none;
+        width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%;
+        background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center;
+        opacity: 0;
+      }
+      #playFlash svg { width: 32px; height: 32px; fill: #fff; }
+      #playFlash.show { animation: playFlash .6s ease-out forwards; }
+      @keyframes playFlash {
+        0% { opacity: 1; transform: scale(.8); }
+        100% { opacity: 0; transform: scale(1.4); }
+      }
       #videoMsg {
         position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 6;
         max-width: min(560px, 80%); padding: 16px 20px; border-radius: 8px;
@@ -251,6 +264,7 @@
         <button id="navNext" class="navArrow" title="Next lecture">›</button>
         <video id="video" controls controlslist="nofullscreen" preload="metadata"></video>
         <div id="videoMsg" class="hiddenEl"></div>
+        <div id="playFlash" aria-hidden="true"></div>
         <div id="seekwrap">
           <div id="seekpreview">
             <canvas id="seekcanvas" width="352" height="198"></canvas>
