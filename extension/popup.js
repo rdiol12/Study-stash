@@ -1094,7 +1094,7 @@ function showUpdate(info) {
   const bar = $("updateBar");
   // a failed check (git missing, not a clone) is worth saying; a missing helper
   // isn't -- the rest of the popup already covers that
-  if (info && info.error && !/helper|native messaging host/i.test(info.error)) {
+  if (info && info.error && !/did not respond|helper unavailable|native messaging host/i.test(info.error)) {
     bar.hidden = false;
     $("updateText").textContent = `Can't check for updates: ${info.error}`;
     $("btnUpdate").hidden = true;
