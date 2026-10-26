@@ -49,6 +49,7 @@ the above.
 | **Skip what you have** | Re-run a course and only the missing lectures download |
 | **One unified list** | DRM + 1080p + files grouped per course, collapsible, with per-item/per-course discard — in the popup and as an on-page panel |
 | **Offline player** | Built-in course library with resume, speed, scrub previews, quizzes |
+| **Library from disk** | Every folder in your courses folder shows up as a course (subfolders = sections), and loose videos/audio as single items, including ones you copy in yourself. Same-name `.srt`/`.vtt` files become captions. Needs the native helper for best results; without it the player reads `file://` folder listings |
 | **Optional Docker engine** | A separate legacy Python downloader for bulk/native-ffmpeg workflows |
 
 ## Install & activate

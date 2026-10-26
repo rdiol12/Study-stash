@@ -6,6 +6,15 @@
 // background worker derives when a download completes. That requires the
 // "Allow access to file URLs" toggle on brave://extensions — checked at
 // runtime with a real fetch, not assumed.
+//
+// The library itself comes from disk (library.js): every folder in a library
+// root is a course and every loose video/audio file a one-item course, with
+// saved Udemy manifests matched onto the files actually there.
+
+import { nativeScan } from "./native.js";
+import {
+  libraryRoots, resolveLibrary, scanViaFileUrls, progressKey, normPath,
+} from "./library.js";
 
 const COURSES_KEY = "courses";
 const PROGRESS_KEY = "playerProgress";
@@ -16,21 +25,74 @@ const $ = (id) => document.getElementById(id);
 const video = $("video");
 
 const state = {
-  courses: {},
+  stored: {},  // saved manifests, as chrome.storage holds them
+  courses: {}, // what the library shows: stored + scanned, matched to disk
   progress: {},
   settings: { speed: 1, volume: 1 },
+  nativeTarget: "",
   courseId: null,
-  playing: null, // rel of the current item
+  playing: null, // progress key of the current item
   saveTimer: null,
 };
 
 // ---------------------------------------------------------------- storage
 
 async function load() {
-  const stored = await chrome.storage.local.get([COURSES_KEY, PROGRESS_KEY, SETTINGS_KEY]);
-  state.courses = stored[COURSES_KEY] || {};
-  state.progress = stored[PROGRESS_KEY] || {};
+  const stored = await chrome.storage.local.get([COURSES_KEY, PROGRESS_KEY, SETTINGS_KEY, "nativeTarget"]);
+  state.stored = stored[COURSES_KEY] || {};
+  state.courses = state.stored;
+  state.progress = migrateProgress(stored[PROGRESS_KEY] || {});
   state.settings = { speed: 1, volume: 1, ...(stored[SETTINGS_KEY] || {}) };
+  state.nativeTarget = stored.nativeTarget || "";
+}
+
+/** Progress used to be keyed by exact relative path, which broke when files
+ *  were renamed ("001. Intro" -> "1. Intro"). Re-key it by progressKey(), which
+ *  ignores padding and extensions; idempotent, so it is safe on every load. */
+function migrateProgress(progress) {
+  for (const p of Object.values(progress)) {
+    const items = {};
+    for (const [rel, ip] of Object.entries(p.items || {})) {
+      const key = progressKey(rel);
+      const prev = items[key];
+      // two old paths collapsing onto one key: keep the furthest-along entry
+      if (!prev || ip.done || (!prev.done && ip.t > prev.t)) items[key] = ip;
+    }
+    p.items = items;
+    if (p.last) p.last = progressKey(p.last);
+  }
+  return progress;
+}
+
+// ---------------------------------------------------------------- disk scan
+
+let scanBusy = null;
+let lastScan = 0;
+
+/** Re-read the library roots and rebuild state.courses. Falls back to the
+ *  saved manifests alone when no root can be listed. */
+function rescan() {
+  if (scanBusy) return scanBusy;
+  scanBusy = (async () => {
+    const roots = libraryRoots(state.stored, state.nativeTarget);
+    const scans = [];
+    for (const root of roots) {
+      const entries = await scanRoot(root);
+      if (entries) scans.push({ root, entries });
+    }
+    state.courses = resolveLibrary(state.stored, scans);
+    lastScan = Date.now();
+  })().finally(() => { scanBusy = null; });
+  return scanBusy;
+}
+
+async function scanRoot(root) {
+  try {
+    return (await nativeScan(root)).entries;
+  } catch {
+    // no helper, or one older than the "scan" op: read file:// listings instead
+    try { return await scanViaFileUrls(root, fileUrl); } catch { return null; }
+  }
 }
 
 async function saveProgress() {
@@ -46,11 +108,14 @@ function prog(courseId) {
   return state.progress[courseId];
 }
 
-function itemProg(courseId, rel) {
+function itemProg(courseId, key) {
   const p = prog(courseId);
-  if (!p.items[rel]) p.items[rel] = { t: 0, d: 0, done: false };
-  return p.items[rel];
+  if (!p.items[key]) p.items[key] = { t: 0, d: 0, done: false };
+  return p.items[key];
 }
+
+/** Progress key of a sidebar item (scanned items carry one; saved ones derive it). */
+const keyOf = (item) => item.key || progressKey(item.rel);
 
 // ---------------------------------------------------------------- helpers
 
@@ -66,16 +131,18 @@ function fileUrl(root, rel) {
   );
 }
 
+const isMedia = (i) => i.kind === "video" || i.kind === "audio";
+
+/** Lectures that can actually play: on disk (when the folder was scanned) and
+ *  in a format the browser handles. Drives progress, Prev/Next and autoplay. */
 function flatVideos(course) {
-  // DRM lectures are decrypted to plain .mp4 at the same path, so they count
-  // and play like any other video.
-  return course.sections.flatMap((s) => s.items).filter((i) => i.kind === "video");
+  return course.sections.flatMap((s) => s.items).filter((i) => isMedia(i) && !i.missing && !i.needsConvert);
 }
 
 function courseStats(course) {
   const vids = flatVideos(course);
   const p = state.progress[course.id];
-  const done = vids.filter((v) => p && p.items[v.rel] && p.items[v.rel].done).length;
+  const done = vids.filter((v) => p && p.items[keyOf(v)] && p.items[keyOf(v)].done).length;
   return { total: vids.length, done, pct: vids.length ? Math.round((100 * done) / vids.length) : 0 };
 }
 
@@ -97,12 +164,16 @@ function renderLibrary() {
 
   const cards = $("cards");
   cards.textContent = "";
-  const list = Object.values(state.courses).sort((a, b) => b.savedAt - a.savedAt);
+  // most recently watched first, then newest downloads, then by name
+  const lastAt = (c) => (state.progress[c.id] && state.progress[c.id].at) || 0;
+  const list = Object.values(state.courses).sort((a, b) =>
+    lastAt(b) - lastAt(a) || (b.savedAt || 0) - (a.savedAt || 0) || a.title.localeCompare(b.title));
 
   if (!list.length) {
     const div = document.createElement("div");
     div.className = "empty";
-    div.textContent = "Nothing downloaded yet. Download a course from the extension popup first.";
+    div.textContent = "Nothing here yet. Download a course from the extension popup, " +
+      "or put course folders, videos or audio files in your courses folder.";
     cards.append(div);
     return;
   }
@@ -117,7 +188,10 @@ function renderLibrary() {
     const thumb = document.createElement("div");
     thumb.className = "thumb";
     thumb.dataset.course = course.id;
-    if (course.thumb) {
+    if (thumbCache.has(course.id)) {
+      thumb.append(thumbCache.get(course.id));
+    } else if (course.thumb) {
+      // data-URL thumbnail saved by older versions
       const img = document.createElement("img");
       img.src = course.thumb;
       img.alt = "";
@@ -136,7 +210,10 @@ function renderLibrary() {
     h.textContent = course.title;
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = `${course.sections.length} sections · ${stats.total} lectures`;
+    const first = flatVideos(course)[0];
+    meta.textContent = course.single
+      ? (first && first.kind === "audio" ? "Audio" : "Video")
+      : `${course.sections.length} sections · ${stats.total} lectures`;
     const bar = document.createElement("div");
     bar.className = "bar";
     const fill = document.createElement("div");
@@ -147,7 +224,7 @@ function renderLibrary() {
     const last = state.progress[course.id] && state.progress[course.id].last;
     pct.textContent = stats.pct
       ? `${stats.pct}% complete${last ? " · continues where you stopped" : ""}`
-      : "Start course";
+      : course.single ? (last ? "Continue" : "Play") : "Start course";
     body.append(h, meta, bar, pct);
 
     if (!course.root) {
@@ -161,85 +238,80 @@ function renderLibrary() {
     cards.append(card);
   }
 
-  generateThumbs(list);
+  // before the first scan the saved paths may be stale (renamed files), so
+  // wait for it rather than probe files that aren't there
+  if (lastScan) generateThumbs(list);
 }
 
 /**
- * Capture one frame per course from its first lecture and cache it as a JPEG
- * data URL. Sequential on purpose: decoding several videos at once is the kind
- * of memory spike that gets a tab killed.
+ * Draw one frame per course from its first lecture onto a <canvas> for the
+ * card. The video only loads metadata plus the frames around the seek point,
+ * so a 4 GB movie costs about as much as a short lecture. A file:// frame
+ * taints the canvas, which is fine for display; it just can't be exported, so
+ * the canvases are cached for the page's lifetime instead of in storage.
+ * Sequential on purpose: decoding several videos at once is the kind of memory
+ * spike that gets a tab killed.
  */
+const thumbCache = new Map(); // courseId -> canvas
 let thumbsBusy = false;
+let thumbsAgain = null; // newest list asked for while a run was in progress
 async function generateThumbs(list) {
-  if (thumbsBusy) return;
+  if (thumbsBusy) {
+    thumbsAgain = list;
+    return;
+  }
   thumbsBusy = true;
   try {
     for (const course of list) {
-      if (course.thumb || !course.root) continue;
-      const first = flatVideos(course)[0];
+      if (thumbCache.has(course.id) || course.thumb || !course.root) continue;
+      const first = flatVideos(course).find((i) => i.kind === "video");
       if (!first) continue;
-      const dataUrl = await captureFrame(fileUrl(course.root, first.rel)).catch(() => null);
-      if (!dataUrl) continue;
-
-      const stored = await chrome.storage.local.get(COURSES_KEY);
-      const courses = stored[COURSES_KEY] || {};
-      if (!courses[course.id]) continue;
-      courses[course.id].thumb = dataUrl;
-      await chrome.storage.local.set({ [COURSES_KEY]: courses });
-      state.courses = courses;
+      const canvas = await captureFrame(fileUrl(course.root, first.rel)).catch(() => null);
+      if (!canvas) continue;
+      thumbCache.set(course.id, canvas);
 
       const slot = document.querySelector(`.thumb[data-course="${CSS.escape(course.id)}"]`);
       if (slot) {
         slot.textContent = "";
-        const img = document.createElement("img");
-        img.src = dataUrl;
-        slot.append(img);
+        slot.append(canvas);
       }
     }
   } finally {
     thumbsBusy = false;
+    if (thumbsAgain) {
+      const next = thumbsAgain;
+      thumbsAgain = null;
+      generateThumbs(next);
+    }
   }
 }
 
-async function captureFrame(src) {
-  // Drawing a file:// video taints the canvas and toDataURL throws. Fetching
-  // it into a blob: URL first keeps the frame same-origin and exportable.
-  const res = await fetch(src);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const blobUrl = URL.createObjectURL(await res.blob());
-  try {
-    return await captureFromBlob(blobUrl);
-  } finally {
-    URL.revokeObjectURL(blobUrl);
-  }
-}
-
-function captureFromBlob(src) {
+function captureFrame(src) {
   return new Promise((resolve, reject) => {
     const v = document.createElement("video");
     v.muted = true;
-    v.preload = "auto";
-    v.src = src;
-    const fail = (why) => {
+    v.preload = "metadata";
+    const done = (fn, arg) => {
+      clearTimeout(timer);
       v.removeAttribute("src");
-      reject(new Error(why));
+      v.load(); // drop the decoder and any buffered data now, not at GC
+      fn(arg);
     };
-    const timer = setTimeout(() => fail("thumbnail timed out"), 15000);
-    v.addEventListener("error", () => { clearTimeout(timer); fail("video error"); });
+    const timer = setTimeout(() => done(reject, new Error("thumbnail timed out")), 15000);
+    v.addEventListener("error", () => done(reject, new Error("video error")), { once: true });
     v.addEventListener("loadedmetadata", () => {
+      if (!v.videoWidth) return done(reject, new Error("no video track"));
       // a few seconds in beats frame 0, which is usually a black fade-in
       v.currentTime = Math.min(5, (v.duration || 10) * 0.1);
-    });
+    }, { once: true });
     v.addEventListener("seeked", () => {
-      clearTimeout(timer);
       const c = document.createElement("canvas");
       c.width = 480;
       c.height = Math.round(480 * (v.videoHeight / v.videoWidth)) || 270;
       c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
-      const url = c.toDataURL("image/jpeg", 0.72);
-      v.removeAttribute("src");
-      resolve(url);
+      done(resolve, c);
     }, { once: true });
+    v.src = src;
   });
 }
 
@@ -260,12 +332,16 @@ async function openCourse(courseId) {
   $("back").classList.remove("hiddenEl");
   $("title").textContent = course.title;
 
+  state.singleAsideShown = false;
+  applyAside();
+  for (const id of ["prev", "next"]) $(id).classList.toggle("hiddenEl", !!course.single);
   await checkFileAccess(course);
   renderSections();
 
   // resume exactly where the student stopped, like Udemy's "continue"
   const p = prog(courseId);
-  const target = p.last || (flatVideos(course)[0] || {}).rel;
+  const vids = flatVideos(course);
+  const target = (p.last && vids.some((v) => keyOf(v) === p.last)) ? p.last : vids[0] && keyOf(vids[0]);
   if (target) play(target, { resume: true });
 }
 
@@ -278,7 +354,10 @@ async function checkFileAccess(course) {
     return;
   }
   const probe = flatVideos(course)[0];
-  if (!probe) return;
+  if (!probe) {
+    warn.classList.add("hiddenEl");
+    return;
+  }
   const url = fileUrl(course.root, probe.rel);
   try {
     // GET, not HEAD: Chromium's file:// handler rejects HEAD outright, which
@@ -319,23 +398,33 @@ function probeDuration(url) {
 }
 
 // Fill in unknown durations from the files on disk, a few at a time, and update
-// the rows in place. Cached in progress, so it only probes once per video.
+// the rows in place. Cached in progress, so it only probes once per video;
+// `probing` keeps a re-render from queueing the same file again mid-probe.
+const probing = new Set();
 async function probeDurations(course, pending) {
+  pending = pending.filter((p) => !probing.has(`${course.id}|${p.key}`));
   if (!course.root || !pending.length) return;
+  for (const p of pending) probing.add(`${course.id}|${p.key}`);
   let i = 0, changed = false;
   const worker = async () => {
     while (i < pending.length) {
-      const { rel, sub } = pending[i++];
+      const { rel, key } = pending[i++];
       const d = await probeDuration(fileUrl(course.root, rel));
+      probing.delete(`${course.id}|${key}`);
       if (!d) continue;
-      const ip = itemProg(course.id, rel);
+      const ip = itemProg(course.id, key);
       if (!ip.d) { ip.d = d; changed = true; }
-      sub.textContent = fmt(d);
+      // the row may have been re-rendered since; update whichever is current
+      const sub = document.querySelector(`.item[data-key="${CSS.escape(key)}"] .sub`);
+      if (sub && sub.textContent === "…") sub.textContent = fmt(d);
     }
   };
   await Promise.all([worker(), worker(), worker()]);
   if (changed) await saveProgress();
 }
+
+// resource lists the user opened, by item key; survives re-renders
+const resOpen = new Set();
 
 function renderSections() {
   const course = state.courses[state.courseId];
@@ -347,7 +436,7 @@ function renderSections() {
     const det = document.createElement("details");
     det.className = "section";
     const key = section.title;
-    const containsPlaying = section.items.some((i) => i.rel === state.playing);
+    const containsPlaying = section.items.some((i) => keyOf(i) === state.playing);
     // remember the user's collapse choice across re-renders; default the first
     // section (and whichever holds the playing video) open on first sight.
     if (!sectionOpen.has(key)) sectionOpen.set(key, si === 0 || containsPlaying);
@@ -358,8 +447,8 @@ function renderSections() {
     const sum = document.createElement("summary");
     const name = document.createElement("span");
     name.textContent = section.title;
-    const vids = section.items.filter((i) => i.kind === "video");
-    const doneCount = vids.filter((v) => itemProg(course.id, v.rel).done).length;
+    const vids = section.items.filter((i) => isMedia(i) && !i.missing && !i.needsConvert);
+    const doneCount = vids.filter((v) => itemProg(course.id, keyOf(v)).done).length;
     const count = document.createElement("span");
     count.className = "count";
     count.textContent = `${doneCount}/${vids.length}`;
@@ -368,15 +457,18 @@ function renderSections() {
 
     for (const item of section.items) {
       const row = document.createElement("div");
-      const ip = itemProg(course.id, item.rel);
-      row.className = "item" + (ip.done ? " done" : "") +
-        (item.rel === state.playing ? " current" : "");
+      const key = keyOf(item);
+      const ip = itemProg(course.id, key);
+      const playable = isMedia(item) && !item.missing && !item.needsConvert;
+      row.className = "item" + (ip.done ? " done" : "") + (item.missing ? " drm" : "") +
+        (key === state.playing ? " current" : "");
+      row.dataset.key = key;
 
       const tick = document.createElement("span");
       tick.className = "tick";
       tick.textContent = ip.done ? "✓" : "";
       tick.title = ip.done ? "Mark as unwatched (resets position)" : "Mark as watched";
-      if (item.kind === "video") {
+      if (playable) {
         tick.addEventListener("click", async (e) => {
           // the per-video reset: unticking clears both the check and the
           // resume position, exactly like re-doing a lecture on Udemy
@@ -393,11 +485,15 @@ function renderSections() {
       label.textContent = item.name;
       const sub = document.createElement("div");
       sub.className = "sub";
-      if (item.kind === "quiz") sub.textContent = "Quiz";
+      if (item.missing) sub.textContent = item.drm ? "Protected — watch on Udemy" : "Not downloaded";
+      else if (item.kind === "quiz") sub.textContent = "Quiz";
+      else if (item.kind === "page") sub.textContent = "Page";
+      else if (item.kind === "file") sub.textContent = "File";
+      else if (item.needsConvert) sub.textContent = "Can't play in the browser — needs converting";
       else if (ip.done) sub.textContent = fmt(ip.d) || "watched";
       else if (ip.t > 1) sub.textContent = `resume at ${fmt(ip.t)}${ip.d ? " / " + fmt(ip.d) : ""}`;
       else if (ip.d) sub.textContent = fmt(ip.d);
-      else if (item.kind === "video") { sub.textContent = "…"; durPending.push({ rel: item.rel, sub }); }
+      else { sub.textContent = "…"; durPending.push({ rel: item.rel, key }); }
       label.append(sub);
 
       row.append(tick, label);
@@ -412,7 +508,7 @@ function renderSections() {
         row.append(badge);
 
         resWrap = document.createElement("div");
-        resWrap.className = "resources hiddenEl";
+        resWrap.className = "resources" + (resOpen.has(key) ? "" : " hiddenEl");
         for (const r of item.resources) {
           const a = document.createElement("a");
           a.className = "res";
@@ -428,13 +524,16 @@ function renderSections() {
         }
         badge.addEventListener("click", (e) => {
           e.stopPropagation();
-          resWrap.classList.toggle("hiddenEl");
+          const hidden = resWrap.classList.toggle("hiddenEl");
+          if (hidden) resOpen.delete(key); else resOpen.add(key);
         });
       }
 
-      row.addEventListener("click", () =>
-        item.kind === "quiz" ? openQuiz(item) : play(item.rel, { resume: true })
-      );
+      if (!item.missing) {
+        row.addEventListener("click", () =>
+          isMedia(item) ? play(key, { resume: true }) : openQuiz(item)
+        );
+      }
       det.append(row);
       if (resWrap) det.append(resWrap);
     }
@@ -446,36 +545,48 @@ function renderSections() {
 
 // ---------------------------------------------------------------- playback
 
-function findItem(rel) {
+function findItem(key) {
   const course = state.courses[state.courseId];
   for (const s of course.sections) {
-    const hit = s.items.find((i) => i.rel === rel);
+    const hit = s.items.find((i) => keyOf(i) === key);
     if (hit) return hit;
   }
   return null;
 }
 
-function play(rel, { resume = false } = {}) {
+function play(key, { resume = false } = {}) {
   const course = state.courses[state.courseId];
   if (!course.root) return;
-  const item = findItem(rel);
-  if (!item || item.kind !== "video") return;
+  const item = findItem(key);
+  if (!item || !isMedia(item) || item.missing) return;
 
-  state.playing = rel;
+  markTime(); // the lecture being left: save its position before the src swap
+  state.playing = key;
   nextCancelledFor = null; // fresh video — re-enable the next-up prompt/autoplay
   hideNextPrompt();
   updateNavArrows();
   pokeNav(); // briefly show the side arrows when a lecture starts
-  const p = prog(course.id);
-  p.last = rel;
-  const ip = itemProg(course.id, rel);
+  $("nowPlaying").textContent = item.name;
 
-  video.src = fileUrl(course.root, rel);
+  if (item.needsConvert) {
+    stopVideo();
+    showVideoMsg(`“${item.name}” is in a format the browser can't play (.${item.rel.split(".").pop()}).\n` +
+      "Convert it to .mp4 (H.264 + AAC) to watch it here.");
+    renderSections();
+    return;
+  }
+  hideVideoMsg();
+
+  const p = prog(course.id);
+  p.last = key;
+  p.at = Date.now(); // library sorts by this
+  const ip = itemProg(course.id, key);
+
+  video.src = fileUrl(course.root, item.rel);
   loadSubtitles(course, item);
   // same file feeds the hover previews; decoded independently of playback
   previewVideo.src = video.src;
   $("seekfill").style.width = "0%";
-  $("nowPlaying").textContent = item.name;
   video.playbackRate = state.settings.speed;
   video.volume = state.settings.volume;
 
@@ -522,31 +633,37 @@ async function loadSubtitles(course, item) {
   trackUrls = [];
   video.querySelectorAll("track").forEach((t) => t.remove());
 
-  const langs = item.captions && item.captions.length ? item.captions : ["en"];
   // strip whatever container extension the file uses (.mp4 browser-mode,
   // .mkv from the Keyframe engine) so sidecar probing works for both
   const base = item.rel.replace(/\.[^./\\]+$/, "");
+  // A scanned folder already says which caption files sit beside the video;
+  // otherwise probe the languages the manifest knows about.
+  const candidates = item.subs
+    ? item.subs.map((sub) => ({ lang: sub.lang, rels: [sub.rel] }))
+    : (item.captions && item.captions.length ? item.captions : ["en"])
+      // we save .srt by default (Keep .vtt leaves .vtt) -- probe .srt first
+      .map((lang) => ({ lang, rels: [`${base}.${lang}.srt`, `${base}.${lang}.vtt`] }));
   let first = true;
 
-  for (const lang of langs) {
+  for (const { lang, rels } of candidates) {
     try {
-      // we save .srt by default (Keep .vtt leaves .vtt) -- probe .srt first
       let text = null;
-      let res = await fetch(fileUrl(course.root, `${base}.${lang}.srt`)).catch(() => null);
-      if (res && res.ok) {
-        text = srtToVtt(await res.text());
-      } else {
-        res = await fetch(fileUrl(course.root, `${base}.${lang}.vtt`)).catch(() => null);
-        if (res && res.ok) text = await res.text();
+      for (const rel of rels) {
+        const res = await fetch(fileUrl(course.root, rel)).catch(() => null);
+        if (!res || !res.ok) continue;
+        const raw = await res.text();
+        text = /\.srt$/i.test(rel) ? srtToVtt(raw) : raw;
+        break;
       }
       if (!text) continue;
+      if (state.playing !== keyOf(item)) return; // switched lecture meanwhile
       const blobUrl = URL.createObjectURL(new Blob([text], { type: "text/vtt" }));
       trackUrls.push(blobUrl);
 
       const track = document.createElement("track");
       track.kind = "subtitles";
-      track.srclang = lang.split("_")[0];
-      track.label = lang;
+      track.srclang = (lang || "und").split("_")[0];
+      track.label = lang || "Subtitles";
       track.src = blobUrl;
       if (first) {
         track.default = true; // native CC menu starts on the first available
@@ -567,15 +684,15 @@ function openQuiz(item) {
 
 function neighbour(offset) {
   const vids = flatVideos(state.courses[state.courseId]);
-  const idx = vids.findIndex((v) => v.rel === state.playing);
+  const idx = vids.findIndex((v) => keyOf(v) === state.playing);
   const next = vids[idx + offset];
-  if (next) play(next.rel, { resume: true });
+  if (next) play(keyOf(next), { resume: true });
 }
 
 function nextVideoItem() {
   if (!state.courseId) return null;
   const vids = flatVideos(state.courses[state.courseId]);
-  const idx = vids.findIndex((v) => v.rel === state.playing);
+  const idx = vids.findIndex((v) => keyOf(v) === state.playing);
   return idx >= 0 ? vids[idx + 1] || null : null;
 }
 
@@ -683,6 +800,45 @@ video.addEventListener("ended", () => {
   if (autoplay) neighbour(1);
 });
 video.addEventListener("pause", markTime);
+
+// ------------------------------------------------- unplayable / missing files
+
+function stopVideo() {
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  previewVideo.removeAttribute("src");
+}
+function showVideoMsg(text) {
+  $("videoMsg").textContent = text;
+  $("videoMsg").classList.remove("hiddenEl");
+}
+function hideVideoMsg() {
+  $("videoMsg").classList.add("hiddenEl");
+}
+
+// A black, silent player says nothing; spell out whether the file is gone or
+// just in a codec Chromium lacks (HEVC, AC3/DTS audio, ...).
+video.addEventListener("error", async () => {
+  const src = video.currentSrc || video.src;
+  if (!src || !state.playing) return;
+  const item = findItem(state.playing);
+  const name = item ? item.name : "This file";
+  let exists = false;
+  try {
+    const controller = new AbortController();
+    const res = await fetch(src, { signal: controller.signal });
+    exists = res.ok;
+    controller.abort(); // headers are enough; never read the body
+  } catch (err) {
+    exists = err.name === "AbortError";
+  }
+  if (src !== (video.currentSrc || video.src)) return; // moved on meanwhile
+  showVideoMsg(exists
+    ? `“${name}” uses a video or audio format the browser can't play.\n` +
+      "Convert it to .mp4 (H.264 + AAC) to watch it here."
+    : `“${name}” isn't on disk any more.\n${decodeURIComponent(src.replace(/^file:\/\/\//, ""))}`);
+});
 setInterval(() => {
   if (!video.paused) markTime();
 }, 5000);
@@ -693,6 +849,11 @@ $("speed").addEventListener("change", () => {
   video.playbackRate = state.settings.speed;
   saveSettings();
 });
+// Give keyboard focus back to the page after picking from a dropdown;
+// otherwise Space/arrows keep changing the <select> instead of the video.
+for (const id of ["speed", "capSize", "capBg"]) {
+  $(id).addEventListener("change", () => $(id).blur());
+}
 // persist volume (debounced — volumechange fires rapidly while dragging)
 let volTimer = null;
 video.addEventListener("volumechange", () => {
@@ -727,20 +888,29 @@ function pokeNav() {
 }
 function updateNavArrows() {
   const vids = state.courseId ? flatVideos(state.courses[state.courseId]) : [];
-  const idx = vids.findIndex((v) => v.rel === state.playing);
+  const idx = vids.findIndex((v) => keyOf(v) === state.playing);
   $("navPrev").classList.toggle("navHidden", !(idx > 0));
   $("navNext").classList.toggle("navHidden", !(idx >= 0 && idx < vids.length - 1));
 }
 $("navPrev").addEventListener("click", () => neighbour(-1));
 $("navNext").addEventListener("click", () => neighbour(1));
 $("course").addEventListener("mousemove", pokeNav);
+// A single movie has nothing to navigate, so its sidebar starts hidden without
+// touching the saved preference for real courses.
 function applyAside() {
-  const hidden = !!state.settings.asideHidden;
+  const course = state.courseId && state.courses[state.courseId];
+  const hidden = course && course.single ? !state.singleAsideShown : !!state.settings.asideHidden;
   $("course").classList.toggle("aside-hidden", hidden);
   $("asideToggle").textContent = hidden ? "«" : "»";
   $("asideToggle").title = hidden ? "Show course content" : "Hide course content";
 }
 $("asideToggle").addEventListener("click", () => {
+  const course = state.courseId && state.courses[state.courseId];
+  if (course && course.single) {
+    state.singleAsideShown = !state.singleAsideShown;
+    applyAside();
+    return;
+  }
   state.settings.asideHidden = !state.settings.asideHidden;
   applyAside();
   saveSettings();
@@ -753,14 +923,20 @@ $("back").addEventListener("click", () => {
   markTime();
   state.courseId = null;
   state.playing = null;
+  hideVideoMsg();
+  applyAside();
   renderLibrary();
 });
+// the native fullscreen button is hidden (controlsList); double-click uses ours
+video.addEventListener("dblclick", toggleFullscreen);
 
 // keyboard shortcuts: Space = play/pause, ←/→ = seek 5s (ignored while typing
 // in a control so Space doesn't also toggle a <select>).
 document.addEventListener("keydown", (e) => {
   const tag = (e.target && e.target.tagName || "").toLowerCase();
   if (tag === "input" || tag === "select" || tag === "textarea") return;
+  // leave browser shortcuts alone: Ctrl+F is Find, not fullscreen
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (!state.playing) return;
   if (e.code === "Space" || e.key === " ") {
     e.preventDefault();
@@ -777,12 +953,33 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/** Re-scan the disk and redraw whichever view is open. */
+async function refreshLibrary() {
+  const open = state.courseId && state.courses[state.courseId];
+  await rescan();
+  // the open course's folder vanished mid-session: keep showing what we had
+  if (open && !state.courses[state.courseId]) state.courses[state.courseId] = open;
+  if (!state.courseId) {
+    renderLibrary();
+  } else if (state.courses[state.courseId]) {
+    checkFileAccess(state.courses[state.courseId]);
+    renderSections();
+    updateNavArrows();
+  }
+}
+
 // live refresh if a download finishes while this page is open
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes[COURSES_KEY]) return;
-  state.courses = changes[COURSES_KEY].newValue || {};
-  if (!state.courseId) renderLibrary();
-  else if (state.courses[state.courseId]) checkFileAccess(state.courses[state.courseId]);
+  if (area !== "local") return;
+  if (changes.nativeTarget) state.nativeTarget = changes.nativeTarget.newValue || "";
+  if (!changes[COURSES_KEY] && !changes.nativeTarget) return;
+  if (changes[COURSES_KEY]) state.stored = changes[COURSES_KEY].newValue || {};
+  refreshLibrary();
+});
+
+// pick up folders and files added or removed while the tab was in the background
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - lastScan > 10000) refreshLibrary();
 });
 
 (async () => {
@@ -792,5 +989,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   video.volume = state.settings.volume;
   applyCaptionStyle();
   applyAside();
-  renderLibrary();
+  renderLibrary(); // saved courses straight away, then what's actually on disk
+  refreshLibrary();
 })();
