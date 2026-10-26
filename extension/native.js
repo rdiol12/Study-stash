@@ -63,6 +63,10 @@ export const nativeDrives = () => call({ op: "drives" }, 15000);
 export const nativeList = (path) => call({ op: "list", path }, 20000);
 export const nativeMkdir = (path) => call({ op: "mkdir", path }, 20000);
 
+/** Self-update of the git-cloned install (see native/updater.py). */
+export const nativeUpdateCheck = () => call({ op: "update-check" }, 90000);
+export const nativeUpdateApply = () => call({ op: "update-apply" }, 3 * 60 * 1000);
+
 /** Merge-move a finished course tree to its final home. Generous timeout:
  *  moving across drives copies the bytes. */
 export const nativeMove = (from, to) => call({ op: "move", from, to }, 30 * 60 * 1000);

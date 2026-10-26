@@ -14,6 +14,7 @@ Operations:
   {"op": "list",  "path": "A:/"}                 -> subdirectories
   {"op": "mkdir", "path": "A:/Courses/New"}
   {"op": "move",  "from": "...", "to": "..."}     -> merge-move a tree
+  {"op": "update-check"} / {"op": "update-apply"} -> see updater.py
 """
 
 import base64
@@ -179,6 +180,14 @@ HANDLERS = {
     "write-chunk": lambda msg: op_write_chunk(msg),
     "write-end": lambda msg: op_write_end(msg),
 }
+
+# Self-update ops live beside this file. Guarded so a broken updater can never
+# take file writing down with it.
+try:
+    import updater  # noqa: E402
+    HANDLERS.update(updater.HANDLERS)
+except Exception:
+    pass
 
 
 def op_write_begin(msg):
