@@ -41,7 +41,7 @@
         display: flex; align-items: center; justify-content: center;
         color: var(--muted); font-size: 34px; font-weight: 700; letter-spacing: 2px;
       }
-      .card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .card .thumb img, .card .thumb canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
       .card .body { padding: 14px 16px 16px; }
       .card h2 { font-size: 15px; margin: 0 0 6px; }
       .card .meta { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
@@ -55,13 +55,21 @@
       #course { display: none; flex: 1; min-height: 0; }
       #course.active { display: flex; }
       #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #000; }
+      /* always "contain": "cover" cut the edges off screen recordings (code, slides) */
       video { width: 100%; flex: 1; min-height: 0; outline: none; background: #000; object-fit: contain; }
-      /* fill the screen (no letterbox) in fullscreen or when the sidebar is hidden */
-      #course.aside-hidden video, #course:fullscreen video { object-fit: cover; }
+      #videoMsg {
+        position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 6;
+        max-width: min(560px, 80%); padding: 16px 20px; border-radius: 8px;
+        background: rgba(17,22,28,.92); color: #f3ca8c; font-size: 14px; text-align: center;
+        white-space: pre-line; overflow-wrap: anywhere;
+      }
       /* the purple strip is the seek bar; hide only the native timeline so
          play/volume/fullscreen stay native. Chromium still honours these
          pseudo-element selectors even though the controls are shadow DOM. */
       video::-webkit-media-controls-timeline { display: none; }
+      /* fullscreen goes through ours (button, F, double-click), which keeps the
+         sidebar and controls; controlslist="nofullscreen" only greys this out */
+      video::-webkit-media-controls-fullscreen-button { display: none; }
       video::-webkit-media-controls-current-time-display,
       video::-webkit-media-controls-time-remaining-display { display: inline-block; }
 
@@ -208,7 +216,7 @@
       #course:fullscreen { background: #000; cursor: none; }
       #course:fullscreen.nav-show { cursor: default; }
       #course:fullscreen #stage { flex: 1; min-width: 0; }
-      #course:fullscreen #video { width: 100%; height: 100%; object-fit: cover; }
+      #course:fullscreen #video { width: 100%; height: 100%; object-fit: contain; }
       #course:fullscreen #seekwrap,
       #course:fullscreen #controls,
       #course:fullscreen #asideToggle {
@@ -241,7 +249,8 @@
         <button id="asideToggle" title="Hide/show course content">»</button>
         <button id="navPrev" class="navArrow" title="Previous lecture">‹</button>
         <button id="navNext" class="navArrow" title="Next lecture">›</button>
-        <video id="video" controls preload="metadata"></video>
+        <video id="video" controls controlslist="nofullscreen" preload="metadata"></video>
+        <div id="videoMsg" class="hiddenEl"></div>
         <div id="seekwrap">
           <div id="seekpreview">
             <canvas id="seekcanvas" width="352" height="198"></canvas>

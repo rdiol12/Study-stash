@@ -12,6 +12,7 @@ Protocol: each message is a 4-byte little-endian length followed by UTF-8 JSON.
 Operations:
   {"op": "ping"}
   {"op": "list",  "path": "A:/"}                 -> subdirectories
+  {"op": "scan",  "path": "A:/Courses"}          -> files + folders, a few levels deep
   {"op": "mkdir", "path": "A:/Courses/New"}
   {"op": "move",  "from": "...", "to": "..."}     -> merge-move a tree
 """
@@ -23,7 +24,7 @@ import shutil
 import struct
 import sys
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # Open writers for streamed file writes, keyed by id. A connectNative port keeps
 # one host process alive for the whole stream, so the handle persists here.
@@ -102,6 +103,53 @@ def op_list(msg):
     }
 
 
+SCAN_MAX_DEPTH = 4       # library/course/section/sub/file
+SCAN_MAX_ENTRIES = 50000  # a stray "C:/" as a library root must not hang the player
+# Chrome drops host->browser messages over 1 MB, so stop well short of that.
+SCAN_MAX_BYTES = 900_000
+
+
+def op_scan(msg):
+    """Walk a library folder for the offline player: every file and folder up to
+    SCAN_MAX_DEPTH levels down, as paths relative to the folder. Names and sizes
+    only -- the player reads the files itself over file://."""
+    full = normalise(msg.get("path"))
+    if not os.path.isdir(full):
+        raise ValueError(f"not a directory: {full}")
+    max_depth = min(int(msg.get("depth") or SCAN_MAX_DEPTH), SCAN_MAX_DEPTH)
+    entries = []
+    budget = [SCAN_MAX_BYTES]
+    truncated = False
+
+    def walk(path, rel, depth):
+        nonlocal truncated
+        try:
+            with os.scandir(path) as it:
+                items = list(it)
+        except OSError:
+            return
+        for entry in items:
+            if len(entries) >= SCAN_MAX_ENTRIES or budget[0] <= 0:
+                truncated = True
+                return
+            if entry.name.startswith(("$", ".")):
+                continue
+            sub = f"{rel}/{entry.name}" if rel else entry.name
+            budget[0] -= len(sub.encode("utf-8")) * 2 + 40  # JSON-escaped worst case
+            try:
+                if entry.is_dir():
+                    entries.append({"rel": sub, "dir": True})
+                    if depth < max_depth:
+                        walk(entry.path, sub, depth + 1)
+                elif entry.is_file():
+                    entries.append({"rel": sub, "size": entry.stat().st_size})
+            except OSError:
+                continue
+
+    walk(full, "", 1)
+    return {"path": full, "entries": entries, "truncated": truncated}
+
+
 def op_drives():
     out = []
     for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
@@ -171,6 +219,7 @@ def op_exists(msg):
 HANDLERS = {
     "ping": lambda msg: {"version": VERSION, "python": sys.version.split()[0]},
     "list": op_list,
+    "scan": op_scan,
     "drives": lambda msg: op_drives(),
     "mkdir": op_mkdir,
     "move": op_move,

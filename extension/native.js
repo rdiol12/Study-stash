@@ -61,6 +61,8 @@ export async function nativeAvailable() {
 
 export const nativeDrives = () => call({ op: "drives" }, 15000);
 export const nativeList = (path) => call({ op: "list", path }, 20000);
+/** Every file and folder under a library folder, a few levels deep (helper 1.2+). */
+export const nativeScan = (path) => call({ op: "scan", path }, 30000);
 export const nativeMkdir = (path) => call({ op: "mkdir", path }, 20000);
 
 /** Merge-move a finished course tree to its final home. Generous timeout:
