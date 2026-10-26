@@ -69,6 +69,9 @@ h1 { margin: 0; font-size: 14px; font-weight: 650; }
   word-break: break-word;
 }
 .banner.info { border-color: var(--accent); color: var(--accent); }
+.update-bar { display: flex; align-items: center; gap: 8px; }
+.update-bar[hidden] { display: none; }
+.update-bar span { flex: 1; }
 
 section { margin-bottom: 10px; }
 

@@ -1089,6 +1089,44 @@ function wire() {
   }
 }
 
+/** "Update available" bar, fed by the background's periodic update check. */
+function showUpdate(info) {
+  const bar = $("updateBar");
+  if (!info || !info.behind) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const n = info.behind;
+  $("updateText").textContent = info.blocker
+    ? `Update available (${n} commit${n > 1 ? "s" : ""}), but ${info.blocker}.`
+    : `Update available: ${n} new commit${n > 1 ? "s" : ""}.`;
+  $("updateText").title = (info.commits || []).join("\n");
+  $("btnUpdate").hidden = !!info.blocker;
+}
+
+async function initUpdate() {
+  $("btnUpdate").addEventListener("click", async () => {
+    const btn = $("btnUpdate");
+    btn.disabled = true;
+    btn.textContent = "Updating…";
+    const res = await chrome.runtime.sendMessage({ type: "update-apply" }).catch((err) => ({ error: err.message }));
+    if (res && res.ok && res.info.updated) {
+      $("updateText").textContent = `Updated to ${res.info.head}. Reloading…`;
+      btn.hidden = true;
+      return; // the extension reloads and this popup closes
+    }
+    btn.disabled = false;
+    btn.textContent = "Update now";
+    $("updateText").textContent = `Update failed: ${(res && res.error) || "no reply"}`;
+  });
+  const { updateInfo } = await chrome.storage.local.get("updateInfo");
+  showUpdate(updateInfo);
+  // refresh in the background if the last check is stale (> 1h)
+  if (!updateInfo || Date.now() - (updateInfo.checked || 0) > 3600e3) {
+    chrome.runtime.sendMessage({ type: "update-check" })
+      .then((res) => { if (res && res.ok) showUpdate(res.info); })
+      .catch(() => {});
+  }
+}
+
 (async function init() {
   try {
     // Each await is announced in the pill first, so if startup stalls the
@@ -1109,6 +1147,7 @@ function wire() {
 
     step("wiring");
     wire();
+    initUpdate().catch(() => {});
     step("prefs");
     await restorePrefs();
     const stored = await chrome.storage.local.get([PREFS_KEY, DEST_KEY]);

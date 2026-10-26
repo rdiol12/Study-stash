@@ -1,7 +1,7 @@
 import { api, getSettings, getPrefs, queueAuto, setCourseRoot, parseCourseUrl, getBearer, exportCookiesTxt } from "./common.js";
 import { findCourse, fetchCurriculum, buildPlan, freshLicenseToken } from "./udemy-api.js";
 import { installNameGuard } from "./name-guard.js";
-import { nativeExists } from "./native.js";
+import { nativeExists, nativeUpdateCheck, nativeUpdateApply } from "./native.js";
 import { setConcurrency } from "./gate.js";
 
 // exactly one listener is allowed across ALL extension contexts, and download
@@ -190,8 +190,31 @@ function schedule() {
   chrome.alarms.create(POLL_ALARM, { periodInMinutes: 0.5 });
 }
 
+// Update check: on browser start and every 6h the helper fetches the repo and
+// reports how far behind origin/master this install is. The popup reads the
+// stored result and offers a one-click update; nothing installs on its own.
+const UPDATE_ALARM = "update-check";
+const UPDATE_KEY = "updateInfo";
+
+async function checkForUpdate() {
+  let info;
+  try { info = { ...(await nativeUpdateCheck()), checked: Date.now() }; }
+  catch (err) { info = { error: err.message || String(err), checked: Date.now() }; }
+  await chrome.storage.local.set({ [UPDATE_KEY]: info });
+  return info;
+}
+
+async function applyUpdate() {
+  const res = await nativeUpdateApply();
+  await chrome.storage.local.set({ [UPDATE_KEY]: { ...res, checked: Date.now() } });
+  // new extension files are on disk; reload to run them (HD jobs resume on wake)
+  if (res.updated) setTimeout(() => chrome.runtime.reload(), 300);
+  return res;
+}
+
 function wake() {
   schedule();
+  chrome.alarms.create(UPDATE_ALARM, { delayInMinutes: 1, periodInMinutes: 360 });
   // the offscreen worker dies with the extension; revive any unfinished job
   resumeHdJobs().catch(() => {});
 }
@@ -221,9 +244,16 @@ chrome.downloads.onChanged.addListener(async (delta) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM) refreshBadge();
+  if (alarm.name === UPDATE_ALARM) checkForUpdate().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg && (msg.type === "update-check" || msg.type === "update-apply")) {
+    (msg.type === "update-check" ? checkForUpdate() : applyUpdate())
+      .then((info) => reply({ ok: true, info }))
+      .catch((err) => reply({ ok: false, error: err.message || String(err) }));
+    return true;
+  }
   if (msg && msg.type === "refresh-badge") {
     refreshBadge().then(() => reply({ ok: true }));
     return true;

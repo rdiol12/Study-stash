@@ -86,6 +86,11 @@ Open a Udemy course you're enrolled in → click the extension → set your
 
 Watch offline from the popup → **My courses**.
 
+**Updates.** With the native helper installed and `git` on PATH, the popup
+shows **Update available** when the repo has new commits on `master`. Click
+**Update now** to fast-forward your clone and reload the extension. It refuses
+(and says why) if you edited files in the install folder or switched branches.
+
 ## Settings that matter
 
 - **Parallel downloads** — how many lectures download at once (1–12).
