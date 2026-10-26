@@ -927,8 +927,27 @@ $("back").addEventListener("click", () => {
   applyAside();
   renderLibrary();
 });
-// the native fullscreen button is hidden (controlsList); double-click uses ours
-video.addEventListener("dblclick", toggleFullscreen);
+// Click the picture to play/pause, double-click for fullscreen (the native
+// fullscreen button is hidden via controlsList, so this uses ours). The single
+// click waits out the double-click window so a double-click doesn't also
+// pause and resume the video.
+const DBLCLICK_MS = 250;
+let clickTimer = null;
+const onControlBar = (e) => e.offsetY > video.clientHeight - 48; // native bar handles these
+video.addEventListener("click", (e) => {
+  if (onControlBar(e)) return;
+  clearTimeout(clickTimer);
+  if (e.detail > 1) return; // second click of a double-click
+  clickTimer = setTimeout(() => {
+    if (!video.currentSrc) return;
+    if (video.paused) video.play().catch(() => {}); else video.pause();
+  }, DBLCLICK_MS);
+});
+video.addEventListener("dblclick", (e) => {
+  clearTimeout(clickTimer);
+  if (onControlBar(e)) return;
+  toggleFullscreen();
+});
 
 // keyboard shortcuts: Space = play/pause, ←/→ = seek 5s (ignored while typing
 // in a control so Space doesn't also toggle a <select>).
