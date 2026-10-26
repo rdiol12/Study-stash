@@ -947,6 +947,9 @@ const PLAY_SVG = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
 const PAUSE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
 function togglePlay() {
   if (video.paused) video.play().catch(() => {}); else video.pause();
+  flashPlayState();
+}
+function flashPlayState() {
   const flash = $("playFlash");
   flash.innerHTML = video.paused ? PAUSE_SVG : PLAY_SVG;
   flash.classList.remove("show");
@@ -986,7 +989,11 @@ document.addEventListener("keydown", (e) => {
   if (!state.playing) return;
   if (e.code === "Space" || e.key === " ") {
     e.preventDefault();
-    togglePlay();
+    // With the <video> itself focused (it is, after any click on it), Chromium's
+    // own controls already toggle on Space before this runs; toggling again
+    // would pause and resume. Then only draw the icon, once the state settled.
+    if (e.target === video) setTimeout(flashPlayState, 0);
+    else togglePlay();
   } else if (e.code === "ArrowLeft") {
     e.preventDefault();
     video.currentTime = Math.max(0, video.currentTime - 5);
