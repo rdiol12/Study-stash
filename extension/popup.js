@@ -1105,7 +1105,9 @@ function showUpdate(info) {
   const n = info.behind;
   $("updateText").textContent = info.blocker
     ? `Update available (${n} commit${n > 1 ? "s" : ""}), but ${info.blocker}.`
-    : `Update available: ${n} new commit${n > 1 ? "s" : ""}.`;
+    : info.unknown
+      ? "Update available (installed version unknown)."
+      : `Update available: ${n} new commit${n > 1 ? "s" : ""}.`;
   $("updateText").title = (info.commits || []).join("\n");
   $("btnUpdate").hidden = !!info.blocker;
 }
