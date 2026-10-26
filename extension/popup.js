@@ -1092,6 +1092,14 @@ function wire() {
 /** "Update available" bar, fed by the background's periodic update check. */
 function showUpdate(info) {
   const bar = $("updateBar");
+  // a failed check (git missing, not a clone) is worth saying; a missing helper
+  // isn't -- the rest of the popup already covers that
+  if (info && info.error && !/helper|native messaging host/i.test(info.error)) {
+    bar.hidden = false;
+    $("updateText").textContent = `Can't check for updates: ${info.error}`;
+    $("btnUpdate").hidden = true;
+    return;
+  }
   if (!info || !info.behind) { bar.hidden = true; return; }
   bar.hidden = false;
   const n = info.behind;
@@ -1119,12 +1127,10 @@ async function initUpdate() {
   });
   const { updateInfo } = await chrome.storage.local.get("updateInfo");
   showUpdate(updateInfo);
-  // refresh in the background if the last check is stale (> 1h)
-  if (!updateInfo || Date.now() - (updateInfo.checked || 0) > 3600e3) {
-    chrome.runtime.sendMessage({ type: "update-check" })
-      .then((res) => { if (res && res.ok) showUpdate(res.info); })
-      .catch(() => {});
-  }
+  // always re-check on open: a cached "up to date" hid merges made since
+  chrome.runtime.sendMessage({ type: "update-check" })
+    .then((res) => { if (res && res.ok) showUpdate(res.info); })
+    .catch(() => {});
 }
 
 (async function init() {
