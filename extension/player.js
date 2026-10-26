@@ -904,7 +904,7 @@ function applyAside() {
   $("asideToggle").textContent = hidden ? "«" : "»";
   $("asideToggle").title = hidden ? "Show course content" : "Hide course content";
 }
-$("asideToggle").addEventListener("click", () => {
+function toggleAside() {
   const course = state.courseId && state.courses[state.courseId];
   if (course && course.single) {
     state.singleAsideShown = !state.singleAsideShown;
@@ -914,7 +914,21 @@ $("asideToggle").addEventListener("click", () => {
   state.settings.asideHidden = !state.settings.asideHidden;
   applyAside();
   saveSettings();
-});
+}
+$("asideToggle").addEventListener("click", toggleAside);
+
+// Fill (crop to the area, no bars) or Fit (whole picture, bars if needed).
+function applyFit() {
+  const fit = state.settings.fit === "fit";
+  $("course").classList.toggle("fit-contain", fit);
+  $("fit").textContent = fit ? "Fit" : "Fill";
+}
+function toggleFit() {
+  state.settings.fit = state.settings.fit === "fit" ? "fill" : "fit";
+  applyFit();
+  saveSettings();
+}
+$("fit").addEventListener("click", () => { toggleFit(); $("fit").blur(); });
 $("nextPromptGo").addEventListener("click", () => { hideNextPrompt(); neighbour(1); });
 $("nextPromptCancel").addEventListener("click", () => { nextCancelledFor = state.playing; hideNextPrompt(); });
 $("prev").addEventListener("click", () => neighbour(-1));
@@ -982,6 +996,12 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "f" || e.key === "F") {
     e.preventDefault();
     toggleFullscreen();
+  } else if (e.key === "s" || e.key === "S") {
+    e.preventDefault();
+    toggleAside();
+  } else if (e.key === "z" || e.key === "Z") {
+    e.preventDefault();
+    toggleFit();
   }
 });
 
@@ -1021,6 +1041,7 @@ document.addEventListener("visibilitychange", () => {
   video.volume = state.settings.volume;
   applyCaptionStyle();
   applyAside();
+  applyFit();
   renderLibrary(); // saved courses straight away, then what's actually on disk
   refreshLibrary();
 })();

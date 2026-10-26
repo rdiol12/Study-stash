@@ -55,8 +55,10 @@
       #course { display: none; flex: 1; min-height: 0; }
       #course.active { display: flex; }
       #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #000; }
-      /* always "contain": "cover" cut the edges off screen recordings (code, slides) */
-      video { width: 100%; flex: 1; min-height: 0; outline: none; background: #000; object-fit: contain; }
+      /* "Fill" (default) crops a little to use the whole area with no black bars;
+         "Fit" shows every pixel for lectures where the edges matter (code, slides) */
+      video { width: 100%; flex: 1; min-height: 0; outline: none; background: #000; object-fit: cover; }
+      #course.fit-contain video { object-fit: contain; }
       /* centered play/pause icon flashed on toggle, like YouTube's */
       #playFlash {
         position: absolute; left: 50%; top: 45%; z-index: 6; pointer-events: none;
@@ -229,7 +231,7 @@
       #course:fullscreen { background: #000; cursor: none; }
       #course:fullscreen.nav-show { cursor: default; }
       #course:fullscreen #stage { flex: 1; min-width: 0; }
-      #course:fullscreen #video { width: 100%; height: 100%; object-fit: contain; }
+      #course:fullscreen #video { width: 100%; height: 100%; }
       #course:fullscreen #seekwrap,
       #course:fullscreen #controls,
       #course:fullscreen #asideToggle {
@@ -241,6 +243,8 @@
       #course:fullscreen.nav-show #seekwrap,
       #course:fullscreen.nav-show #controls,
       #course:fullscreen.nav-show #asideToggle { opacity: 1; pointer-events: auto; }
+      /* above the sidebar overlay (z 8), or the overlay swallows its clicks */
+      #course:fullscreen #asideToggle { z-index: 9; }
       #course:fullscreen #nextPrompt { bottom: 76px; }
       /* sidebar becomes an overlay on the right so the video stays full */
       #course:fullscreen aside { position: absolute; right: 0; top: 0; bottom: 0; width: 360px; z-index: 8; box-shadow: -4px 0 16px rgba(0,0,0,.5); }
@@ -284,6 +288,7 @@
           <button id="prev">‹ Prev</button>
           <button id="next">Next ›</button>
           <button id="fs" title="Fullscreen (F)">⛶</button>
+          <button id="fit" title="Fill the screen or fit the whole picture (Z)">Fill</button>
           <span class="cc-group">
             <label for="capSize">CC</label>
             <select id="capSize" title="Subtitle size">
