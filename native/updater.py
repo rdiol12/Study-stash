@@ -41,8 +41,14 @@ def _git(*args, timeout=60):
 
 
 def _status(fetch=True):
-    if not os.path.isdir(os.path.join(REPO, ".git")):
-        raise ValueError("this install is not a git clone; re-install with git clone to get updates")
+    # ask git rather than looking for a .git folder: worktrees and some clients
+    # use a .git file, and git's own error (e.g. dubious ownership) is useful
+    try:
+        top = _git("rev-parse", "--show-toplevel")
+    except ValueError as exc:
+        raise ValueError(f"the helper runs from {REPO}, which git can't use: {exc}")
+    if not os.path.samefile(top, REPO):
+        raise ValueError(f"the helper runs from {REPO}, which is not the top of a git clone")
     if fetch:
         _git("fetch", "--quiet", REMOTE, BRANCH)
     upstream = f"{REMOTE}/{BRANCH}"
