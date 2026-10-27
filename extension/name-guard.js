@@ -1,4 +1,4 @@
-// Forces the filename of downloads this extension starts.
+// Forces the filename of downloads this extension starts, and only those.
 //
 // Why it exists: chrome.downloads.download() accepted our full relative path
 // without error, then saved blob downloads as "<uuid>.mp4" anyway — measured,
@@ -20,6 +20,16 @@ export function installNameGuard() {
   if (installed || !chrome.downloads || !chrome.downloads.onDeterminingFilename) return;
   installed = true;
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    // Only downloads this extension started are ours to name. Anything the
+    // user starts (any site, any blob/data export) keeps the browser's own
+    // name and default download folder. byExtensionId is how Chromium marks
+    // the origin; if a browser leaves it unset we still only rename URLs we
+    // registered ourselves.
+    const byOther = item.byExtensionId !== undefined && item.byExtensionId !== chrome.runtime.id;
+    if (byOther || item.byExtensionId === undefined && !isPending(item)) {
+      suggest();
+      return;
+    }
     // Match on both fields: blob/data downloads can report the lookup key under
     // either item.url or item.finalUrl, and a miss here is what makes Brave fall
     // back to the Save As chooser.
@@ -32,13 +42,17 @@ export function installNameGuard() {
     }
     const u = item.finalUrl || item.url || "";
     if (/^(blob|data):/i.test(u)) {
-      // A blob/data URL has no inferable name, so Brave would prompt. Give it a
-      // safe fallback name instead of ever showing the chooser.
+      // One of ours whose registration was lost: a blob/data URL has no
+      // inferable name, so Brave would prompt. Give it a safe fallback name
+      // instead of ever showing the chooser.
       const ext = /subrip|\.srt/i.test(u) ? "srt" : "mp4";
       suggest({ filename: `keyframe-download-${Date.now()}.${ext}`, conflictAction: "uniquify" });
       return;
     }
-    // a normal http(s) download that isn't ours — leave the browser's choice
     suggest();
   });
+}
+
+function isPending(item) {
+  return pending.has(item.url) || pending.has(item.finalUrl);
 }
