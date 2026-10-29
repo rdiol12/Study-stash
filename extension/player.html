@@ -54,11 +54,23 @@
       /* ---------- player ---------- */
       #course { display: none; flex: 1; min-height: 0; }
       #course.active { display: flex; }
-      #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #000; }
-      /* "Fill" (default) crops a little to use the whole area with no black bars;
-         "Fit" shows every pixel for lectures where the edges matter (code, slides) */
-      video { width: 100%; flex: 1; min-height: 0; outline: none; background: #000; object-fit: cover; }
-      #course.fit-contain video { object-fit: contain; }
+      #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+      /* Windowed, the box takes the video's own shape (--ar, set from its
+         metadata), so the whole picture shows: no crop, and no bars as long as
+         the width fits. If the window is too short the box shrinks and the
+         picture is centred on the page colour. */
+      video {
+        width: 100%; flex: 0 1 auto; min-height: 0; aspect-ratio: var(--ar, 16 / 9);
+        outline: none; background: var(--bg); object-fit: contain;
+      }
+      /* Fullscreen: "Fill" (default) crops a little to use the whole screen with
+         no black bars; "Fit" shows every pixel for lectures where the edges
+         matter (code, slides). The button only shows there. */
+      #course:fullscreen #stage { background: #000; }
+      #course:fullscreen video { flex: 1; aspect-ratio: auto; background: #000; object-fit: cover; }
+      #course:fullscreen.fit-contain video { object-fit: contain; }
+      #fit { display: none; }
+      #course:fullscreen #fit { display: inline-block; }
       /* centered play/pause icon flashed on toggle, like YouTube's */
       #playFlash {
         position: absolute; left: 50%; top: 45%; z-index: 6; pointer-events: none;
