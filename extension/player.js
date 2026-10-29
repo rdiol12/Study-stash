@@ -998,6 +998,12 @@ function toggleAside() {
 $("asideToggle").addEventListener("click", toggleAside);
 
 // Fill (crop to the area, no bars) or Fit (whole picture, bars if needed).
+// windowed, the video box follows the picture's own shape (see the CSS)
+video.addEventListener("loadedmetadata", () => {
+  if (video.videoWidth && video.videoHeight) {
+    video.style.setProperty("--ar", `${video.videoWidth} / ${video.videoHeight}`);
+  }
+});
 function applyFit() {
   const fit = state.settings.fit === "fit";
   $("course").classList.toggle("fit-contain", fit);
