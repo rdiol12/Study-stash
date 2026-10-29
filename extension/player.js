@@ -925,13 +925,21 @@ function pokeNav() {
   }, 4000);
 }
 // The browser's bar is up whenever ours is (mouse moved recently), and,
-// windowed, the whole time the video is paused.
+// windowed, the whole time the video is paused. Windowed, the browser also
+// drops its bar the moment the mouse leaves the video, so the cues follow
+// right away instead of waiting out the idle timer.
+let mouseOverVideo = false;
 function updateCaptionLift() {
   const navShown = $("course").classList.contains("nav-show");
-  liftCaptions(navShown || (!document.fullscreenElement && video.paused));
+  const fs = !!document.fullscreenElement;
+  liftCaptions((navShown && (fs || mouseOverVideo)) || (!fs && video.paused));
 }
 video.addEventListener("play", updateCaptionLift);
 video.addEventListener("pause", updateCaptionLift);
+video.addEventListener("mouseleave", () => {
+  mouseOverVideo = false;
+  updateCaptionLift();
+});
 
 // The control bars (the browser's, and in fullscreen ours too) overlay the
 // bottom of the video, right where subtitles sit, so while they're showing the
@@ -963,7 +971,10 @@ function updateNavArrows() {
 }
 $("navPrev").addEventListener("click", () => neighbour(-1));
 $("navNext").addEventListener("click", () => neighbour(1));
-$("course").addEventListener("mousemove", pokeNav);
+$("course").addEventListener("mousemove", (e) => {
+  mouseOverVideo = e.target === video;
+  pokeNav();
+});
 // A single movie has nothing to navigate, so its sidebar starts hidden without
 // touching the saved preference for real courses.
 function applyAside() {
