@@ -25,7 +25,7 @@ import shutil
 import struct
 import sys
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # Open writers for streamed file writes, keyed by id. A connectNative port keeps
 # one host process alive for the whole stream, so the handle persists here.
@@ -83,6 +83,17 @@ def normalise(path):
     return full
 
 
+def parent_of(full):
+    """Parent folder, or None at a drive root. dirname("C:") is "C:" (the
+    drive's current folder), so going up from "C:\\" used to loop inside the
+    drive instead of returning to the drive list."""
+    drive, tail = os.path.splitdrive(full)
+    if tail.strip(os.sep) == "":
+        return None
+    parent = os.path.dirname(full.rstrip(os.sep))
+    return None if parent == full else parent
+
+
 def op_list(msg):
     full = normalise(msg.get("path"))
     if not os.path.isdir(full):
@@ -95,10 +106,9 @@ def op_list(msg):
                     dirs.append(entry.name)
             except OSError:
                 continue
-    parent = os.path.dirname(full.rstrip(os.sep))
     return {
         "path": full,
-        "parent": None if parent == full else parent,
+        "parent": parent_of(full),
         "dirs": sorted(dirs, key=str.lower),
         "writable": os.access(full, os.W_OK),
     }
