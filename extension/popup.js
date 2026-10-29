@@ -243,7 +243,15 @@ async function browseNative(path) {
         absolute: true,
       };
     } else {
-      const res = await nativeList(path);
+      let res;
+      try {
+        res = await nativeList(path);
+      } catch (err) {
+        // the saved folder is gone (drive unplugged, renamed): start from the
+        // drive list instead of an empty picker with no way out
+        setBanner(`${err.message} — showing all drives.`, "info");
+        return browseNative("");
+      }
       data = { ...res, absolute: true };
     }
     state.browsePath = data.path;
@@ -252,11 +260,16 @@ async function browseNative(path) {
     const list = $("pickerList");
     list.textContent = "";
 
-    if (data.parent !== null && data.path) {
+    if (data.path) {
+      // Up from a drive root goes back to the drive list ("This PC"), which is
+      // the only way to switch drives. Older helpers report the drive's current
+      // folder as the parent of "C:\\", so decide it here as well.
+      const atDriveRoot = /^[A-Za-z]:[\\/]*$/.test(data.path);
+      const upTo = atDriveRoot || !data.parent ? "" : data.parent;
       const up = document.createElement("li");
       up.className = "dir-up";
-      up.textContent = "⬆  ..";
-      up.addEventListener("click", () => browseNative(data.parent || ""));
+      up.textContent = atDriveRoot ? "⬆  This PC (all drives)" : "⬆  ..";
+      up.addEventListener("click", () => browseNative(upTo));
       list.append(up);
     }
     if (!data.dirs.length) {
