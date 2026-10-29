@@ -916,18 +916,26 @@ function pokeNav() {
   // on idle, and re-setting `controls` (even to the same value) brings it
   // back and keeps it up until the mouse moves again.
   if (!video.controls) video.controls = true;
-  liftCaptions(!!document.fullscreenElement);
+  updateCaptionLift();
   clearTimeout(navIdleTimer);
   navIdleTimer = setTimeout(() => {
     $("course").classList.remove("nav-show");
     if (document.fullscreenElement) video.controls = false;
-    liftCaptions(false);
+    updateCaptionLift();
   }, 4000);
 }
+// The browser's bar is up whenever ours is (mouse moved recently), and,
+// windowed, the whole time the video is paused.
+function updateCaptionLift() {
+  const navShown = $("course").classList.contains("nav-show");
+  liftCaptions(navShown || (!document.fullscreenElement && video.paused));
+}
+video.addEventListener("play", updateCaptionLift);
+video.addEventListener("pause", updateCaptionLift);
 
-// In fullscreen the seek strip and control bar overlay the bottom of the
-// video, right where subtitles sit, so while they're showing the cues move up
-// a few lines (like YouTube does); "auto" puts them back at the bottom.
+// The control bars (the browser's, and in fullscreen ours too) overlay the
+// bottom of the video, right where subtitles sit, so while they're showing the
+// cues move up a few lines (like YouTube does); "auto" puts them back.
 const CAPTION_LIFT_LINE = -4; // lines from the bottom; auto is effectively -1
 let captionsLifted = false;
 function liftCaptions(lift) {
