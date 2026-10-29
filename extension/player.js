@@ -912,12 +912,15 @@ function pokeNav() {
   $("course").classList.add("nav-show");
   // In fullscreen the browser's own control bar follows ours: on its own it
   // stayed up (always, while paused) after ours had faded, blocking the view.
-  video.controls = true;
+  // Windowed, the attribute is left alone: the browser hides that bar itself
+  // on idle, and re-setting `controls` (even to the same value) brings it
+  // back and keeps it up until the mouse moves again.
+  if (!video.controls) video.controls = true;
   liftCaptions(!!document.fullscreenElement);
   clearTimeout(navIdleTimer);
   navIdleTimer = setTimeout(() => {
     $("course").classList.remove("nav-show");
-    video.controls = !document.fullscreenElement;
+    if (document.fullscreenElement) video.controls = false;
     liftCaptions(false);
   }, 4000);
 }
