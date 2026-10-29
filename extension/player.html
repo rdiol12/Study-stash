@@ -238,14 +238,15 @@
         position: absolute; z-index: 7;
         opacity: 0; transition: opacity .3s ease; pointer-events: none;
       }
-      #course:fullscreen #seekwrap { left: 0; right: 0; bottom: 54px; }
-      #course:fullscreen #controls { left: 0; right: 0; bottom: 0; background: rgba(17,22,28,.94); padding: 10px 16px; margin: 0; }
+      /* stacked above the browser's own 48px control bar, which shows with ours */
+      #course:fullscreen #seekwrap { left: 0; right: 0; bottom: 102px; }
+      #course:fullscreen #controls { left: 0; right: 0; bottom: 48px; background: rgba(17,22,28,.94); padding: 10px 16px; margin: 0; }
       #course:fullscreen.nav-show #seekwrap,
       #course:fullscreen.nav-show #controls,
       #course:fullscreen.nav-show #asideToggle { opacity: 1; pointer-events: auto; }
       /* above the sidebar overlay (z 8), or the overlay swallows its clicks */
       #course:fullscreen #asideToggle { z-index: 9; }
-      #course:fullscreen #nextPrompt { bottom: 76px; }
+      #course:fullscreen #nextPrompt { bottom: 124px; }
       /* sidebar becomes an overlay on the right so the video stays full */
       #course:fullscreen aside { position: absolute; right: 0; top: 0; bottom: 0; width: 360px; z-index: 8; box-shadow: -4px 0 16px rgba(0,0,0,.5); }
     </style>

@@ -321,6 +321,16 @@ function captureFrame(src) {
 // re-renders. Cleared when a different course is opened.
 const sectionOpen = new Map();
 
+let revealPlaying = false; // set by play() when switching lectures within a course
+
+/** Open/closed state of each section, saved per course so it survives
+ *  reopening the course and reloads (keyed by section title). */
+function sectionState(courseId) {
+  const p = prog(courseId);
+  if (!p.sections) p.sections = {};
+  return p.sections;
+}
+
 async function openCourse(courseId) {
   const course = state.courses[courseId];
   if (!course) return;
@@ -439,10 +449,23 @@ function renderSections() {
     const containsPlaying = section.items.some((i) => keyOf(i) === state.playing);
     // remember the user's collapse choice across re-renders; default the first
     // section (and whichever holds the playing video) open on first sight.
-    if (!sectionOpen.has(key)) sectionOpen.set(key, si === 0 || containsPlaying);
-    if (containsPlaying) sectionOpen.set(key, true); // always reveal what's playing
+    const saved = sectionState(course.id);
+    if (!sectionOpen.has(key)) sectionOpen.set(key, key in saved ? saved[key] : si === 0 || containsPlaying);
+    if (containsPlaying && revealPlaying && saved[key] === false) {
+      saved[key] = true;
+      saveProgress();
+    }
+    // reveal the section a lecture switch landed in (Next, autoplay, a click);
+    // on reopening a course the remembered state wins instead
+    if (containsPlaying && revealPlaying) sectionOpen.set(key, true);
     det.open = sectionOpen.get(key);
-    det.addEventListener("toggle", () => sectionOpen.set(key, det.open));
+    det.addEventListener("toggle", () => {
+      sectionOpen.set(key, det.open);
+      if (saved[key] !== det.open) {
+        saved[key] = det.open;
+        saveProgress();
+      }
+    });
 
     const sum = document.createElement("summary");
     const name = document.createElement("span");
@@ -540,6 +563,7 @@ function renderSections() {
     wrap.append(det);
   });
 
+  revealPlaying = false;
   probeDurations(course, durPending); // fill unknown durations from disk, in place
 }
 
@@ -561,6 +585,7 @@ function play(key, { resume = false } = {}) {
   if (!item || !isMedia(item) || item.missing) return;
 
   markTime(); // the lecture being left: save its position before the src swap
+  revealPlaying = !!state.playing && state.playing !== key;
   state.playing = key;
   nextCancelledFor = null; // fresh video — re-enable the next-up prompt/autoplay
   hideNextPrompt();
@@ -669,6 +694,8 @@ async function loadSubtitles(course, item) {
         track.default = true; // native CC menu starts on the first available
         first = false;
       }
+      // cues arrive after the track loads; a lecture opened mid-hover needs the lift too
+      track.addEventListener("load", applyCaptionLift, { once: true });
       video.append(track);
     } catch {
       /* that language wasn't downloaded */
@@ -883,8 +910,39 @@ document.addEventListener("fullscreenchange", () => pokeNav());
 let navIdleTimer = null;
 function pokeNav() {
   $("course").classList.add("nav-show");
+  // In fullscreen the browser's own control bar follows ours: on its own it
+  // stayed up (always, while paused) after ours had faded, blocking the view.
+  video.controls = true;
+  liftCaptions(!!document.fullscreenElement);
   clearTimeout(navIdleTimer);
-  navIdleTimer = setTimeout(() => $("course").classList.remove("nav-show"), 4000);
+  navIdleTimer = setTimeout(() => {
+    $("course").classList.remove("nav-show");
+    video.controls = !document.fullscreenElement;
+    liftCaptions(false);
+  }, 4000);
+}
+
+// In fullscreen the seek strip and control bar overlay the bottom of the
+// video, right where subtitles sit, so while they're showing the cues move up
+// a few lines (like YouTube does); "auto" puts them back at the bottom.
+const CAPTION_LIFT_LINE = -4; // lines from the bottom; auto is effectively -1
+let captionsLifted = false;
+function liftCaptions(lift) {
+  if (lift === captionsLifted) return;
+  captionsLifted = lift;
+  applyCaptionLift();
+}
+function applyCaptionLift() {
+  for (const track of video.textTracks) {
+    if (!track.cues) continue;
+    for (const cue of track.cues) cue.line = captionsLifted ? CAPTION_LIFT_LINE : "auto";
+    // Chromium doesn't re-lay out a cue already on screen when its line
+    // changes; flipping the mode makes it redraw at the new place.
+    if (track.mode === "showing") {
+      track.mode = "hidden";
+      track.mode = "showing";
+    }
+  }
 }
 function updateNavArrows() {
   const vids = state.courseId ? flatVideos(state.courses[state.courseId]) : [];
